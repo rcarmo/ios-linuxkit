@@ -5,11 +5,26 @@
 MESON ?= meson
 NINJA ?= ninja
 CC ?= clang
+XCODEBUILD ?= xcodebuild
+LDID ?= ldid
 
 RELEASE_BUILD_DIR ?= build-arm64-linux
 DEBUG_BUILD_DIR ?= build-arm64-linux-debug
 ROOTFS_DIR ?= $(CURDIR)/alpine-arm64-fakefs
 DEBIAN_ROOTFS_DIR ?= $(CURDIR)/debian-arm64-fakefs
+XCODE_SYMROOT ?= $(CURDIR)/build/xcode
+XCODE_OBJROOT ?= $(CURDIR)/build/xcode-obj
+IPA_TARGET ?= iSH-ARM64
+IPA_EXTENSION_TARGET ?= iSHFileProvider
+IPA_CONFIGURATION ?= Release
+IPA_PRODUCT_NAME ?= LinuxKit
+IPA_EXTENSION_PRODUCT_NAME ?= iSHFileProvider
+IPA_BUNDLE_IDENTIFIER ?= app.ish.iSH
+IPA_APP_GROUP_IDENTIFIER ?= group.$(IPA_BUNDLE_IDENTIFIER)
+IPA_WORK_DIR ?= $(CURDIR)/build/ipa
+IPA_OUTPUT ?= $(CURDIR)/build/$(IPA_PRODUCT_NAME)-unsigned.ipa
+IPA_APP ?= $(XCODE_SYMROOT)/$(IPA_CONFIGURATION)-iphoneos/$(IPA_PRODUCT_NAME).app
+IPA_EXTENSION ?= $(XCODE_SYMROOT)/$(IPA_CONFIGURATION)-iphoneos/$(IPA_EXTENSION_PRODUCT_NAME).appex
 DEBIAN_SUITE ?= trixie
 NODE_VERSION ?= 24.14.1
 BUN_VERSION ?= 1.3.13
@@ -28,6 +43,7 @@ help:
 	@echo "  make build-arm64-linux              Build release Linux host binary"
 	@echo "  make build-arm64-linux-debug        Build debug Linux host binary"
 	@echo "  make build-arm64-linux-all          Build release + debug"
+	@echo "  make ipa                            Build fakesigned iPhoneOS IPA with bundled Alpine rootfs for sideloading"
 	@echo "  make test-arm64-runtime-coverage    Run staged C/Go/Bun/Node/Python/Lua/Java/Clojure/PyPy/Swift/Rust/Erlang/Zig coverage"
 	@echo "  make test-arm64-runtime-coverage-debug"
 	@echo "                                      Run coverage against debug binary"
@@ -57,6 +73,50 @@ build-arm64-linux-debug:
 
 .PHONY: build-arm64-linux-all
 build-arm64-linux-all: build-arm64-linux build-arm64-linux-debug
+
+.PHONY: ipa ipa-app ipa-extension
+ipa: $(IPA_OUTPUT)
+	@echo "IPA written to $(IPA_OUTPUT)"
+
+ipa-app:
+	$(XCODEBUILD) -project iSH.xcodeproj \
+	  -target "$(IPA_TARGET)" \
+	  -configuration "$(IPA_CONFIGURATION)" \
+	  -sdk iphoneos \
+	  SYMROOT="$(XCODE_SYMROOT)" \
+	  OBJROOT="$(XCODE_OBJROOT)" \
+	  CODE_SIGNING_ALLOWED=NO \
+	  CODE_SIGNING_REQUIRED=NO \
+	  CODE_SIGN_IDENTITY= \
+	  build
+
+ipa-extension:
+	$(XCODEBUILD) -project iSH.xcodeproj \
+	  -target "$(IPA_EXTENSION_TARGET)" \
+	  -configuration "$(IPA_CONFIGURATION)" \
+	  -sdk iphoneos \
+	  SYMROOT="$(XCODE_SYMROOT)" \
+	  OBJROOT="$(XCODE_OBJROOT)" \
+	  CODE_SIGNING_ALLOWED=NO \
+	  CODE_SIGNING_REQUIRED=NO \
+	  CODE_SIGN_IDENTITY= \
+	  build
+
+$(IPA_OUTPUT): ipa-app ipa-extension
+	@command -v "$(LDID)" >/dev/null || { echo "missing ldid; install it with: brew install ldid-procursus" >&2; exit 1; }
+	@test -d "$(IPA_APP)" || { echo "missing app bundle: $(IPA_APP)" >&2; exit 1; }
+	@test -d "$(IPA_EXTENSION)" || { echo "missing app extension: $(IPA_EXTENSION)" >&2; exit 1; }
+	rm -rf "$(IPA_WORK_DIR)"
+	mkdir -p "$(IPA_WORK_DIR)/Payload" "$(IPA_WORK_DIR)/entitlements"
+	cp -R "$(IPA_APP)" "$(IPA_WORK_DIR)/Payload/"
+	mkdir -p "$(IPA_WORK_DIR)/Payload/$(IPA_PRODUCT_NAME).app/PlugIns"
+	cp -R "$(IPA_EXTENSION)" "$(IPA_WORK_DIR)/Payload/$(IPA_PRODUCT_NAME).app/PlugIns/"
+	printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '<key>com.apple.developer.user-fonts</key>' '<array><string>app-usage</string></array>' '<key>com.apple.security.application-groups</key>' '<array><string>$(IPA_APP_GROUP_IDENTIFIER)</string></array>' '</dict>' '</plist>' > "$(IPA_WORK_DIR)/entitlements/app.plist"
+	printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '<key>com.apple.security.application-groups</key>' '<array><string>$(IPA_APP_GROUP_IDENTIFIER)</string></array>' '</dict>' '</plist>' > "$(IPA_WORK_DIR)/entitlements/fileprovider.plist"
+	$(LDID) -S"$(IPA_WORK_DIR)/entitlements/fileprovider.plist" "$(IPA_WORK_DIR)/Payload/$(IPA_PRODUCT_NAME).app/PlugIns/$(IPA_EXTENSION_PRODUCT_NAME).appex/$(IPA_EXTENSION_PRODUCT_NAME)"
+	$(LDID) -S"$(IPA_WORK_DIR)/entitlements/app.plist" "$(IPA_WORK_DIR)/Payload/$(IPA_PRODUCT_NAME).app/$(IPA_PRODUCT_NAME)"
+	rm -f "$(IPA_OUTPUT)"
+	cd "$(IPA_WORK_DIR)" && zip -qry "$(IPA_OUTPUT)" Payload
 
 $(DEBIAN_ROOTFS_DIR): | build-arm64-linux
 	@command -v debootstrap >/dev/null || { echo "missing debootstrap; install it first (sudo apt install debootstrap)" >&2; exit 1; }
