@@ -157,6 +157,12 @@ test-arm64-lseek-width: build-arm64-linux $(DEBIAN_ROOTFS_DIR)
 	ROOTFS="$(DEBIAN_ROOTFS_DIR)" TIMEOUT_S="$(TIMEOUT_S)" \
 	./tests/arm64/fs/run-lseek-width.sh
 
+.PHONY: test-arm64-poke-stress
+test-arm64-poke-stress: build-arm64-linux $(DEBIAN_ROOTFS_DIR)
+	CC="$(CC)" ISH_BIN="$(abspath $(RELEASE_BUILD_DIR))/ish" \
+	ROOTFS="$(DEBIAN_ROOTFS_DIR)" \
+	./tests/arm64/signals/run-poke-stress.sh
+
 .PHONY: test-arm64-internal-continue-fixtures
 test-arm64-internal-continue-fixtures: build-arm64-linux
 	ISH_BIN="$(CURDIR)/$(RELEASE_BUILD_DIR)/ish" \

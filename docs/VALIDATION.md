@@ -21,6 +21,7 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | Gate | Command | Scope |
 |---|---|---|
 | AdvSIMD FP conversions | `CC=clang make test-arm64-fcvt-vector` | Native AArch64 oracle plus guest widening/narrowing, FP state and decoder masks. |
+| CPU poke delivery | `CC=clang make test-arm64-poke-stress` | Native oracle and five guest repetitions of acknowledged signals to a compute-bound process. |
 | Full-width seeks | `CC=clang make test-arm64-lseek-width` | Static raw-syscall/libc boundary oracle and guest Python sparse-file integration (Debian rootfs with Python required). |
 | proc mem seeks | `CC=clang make test-arm64-proc-mem-seek` | One static fixture natively and under iSH; checks `/proc/<pid>/mem` negative, wrapping, `SEEK_SET`/`SEEK_CUR` and rejected `SEEK_END` semantics. |
 | Release runtime | `make test-arm64-runtime-coverage` | Shell, package manager, C fixtures and language runtimes. |

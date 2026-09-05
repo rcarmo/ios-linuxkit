@@ -1086,7 +1086,13 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
             frame->last_block = NULL;
         }
 
-        if (interrupt == INT_NONE && __atomic_exchange_n(frame->cpu.poked_ptr, false, __ATOMIC_ACQUIRE))
+        // Most block boundaries have no pending poke. Avoid an exclusive
+        // read/modify/write in that case; the exchange still consumes a real
+        // poke with acquire ordering. A poke arriving after a false load stays
+        // set for the next boundary, just as one arriving after the exchange.
+        if (interrupt == INT_NONE &&
+                __atomic_load_n(frame->cpu.poked_ptr, __ATOMIC_RELAXED) &&
+                __atomic_exchange_n(frame->cpu.poked_ptr, false, __ATOMIC_ACQUIRE))
             interrupt = INT_TIMER;
         if (interrupt == INT_NONE && (++frame->cpu.cycle & ((1 << 10) - 1)) == 0)
             interrupt = INT_TIMER;
