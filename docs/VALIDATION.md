@@ -132,7 +132,7 @@ When a broad row fails, rerun its exact guest command with a bounded timeout. Pr
 
 The [5 September seek investigation](reports/audits/ARM_LINUX_LSEEK_2026-09-05.md) records `a5d571f2`: a guest Python sparse-file failure reduced to a raw-syscall boundary fixture, with before/after release and debug results. The [CPU poke benchmark](reports/benchmarks/ARM_LINUX_POKE_2026-09-05.md) records the candidate committed as `e1417b6e`: 30 controlled compute pairs, 1.5–2.2% median improvement across two series, no demonstrated startup/I/O benefit, and acknowledged-signal stress coverage. [Source release 2.1.2](reports/releases/IOS_LINUXKIT_2.1.2.md) records its release gates.
 
-The [load-dispatch investigation](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) records the second pass against 2.1.2: 2.65% and 1.86% compute median reductions, 23/30 faster pairs, and a rejected non-repeatable TLB candidate. Native/baseline/release/debug exact-PC fixtures passed; no iOS speedup is inferred.
+The [load-dispatch investigation](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) records the second pass against 2.1.2: 2.65% and 1.86% compute median reductions, 23/30 faster pairs, and a rejected non-repeatable TLB candidate. Native/baseline/release/debug exact-PC fixtures passed; no iOS speedup is inferred. [Source release 2.1.3](reports/releases/IOS_LINUXKIT_2.1.3.md) records fresh release/debug builds, all five focused gates and four additional native-oracle fixture comparisons per build.
 
 Two pre-existing failures from the earlier run remain open:
 

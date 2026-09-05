@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.1.2 with Apple build number 808; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.1.3 with Apple build number 809; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 
@@ -105,3 +105,5 @@ Do not use the inherited upload lane for this fork until its scheme, bundle iden
 ## Release boundary
 
 Linux-host validation can establish emulator and guest-runtime behaviour. It cannot validate Xcode compilation, entitlements, signing, installation, background behaviour or App Store processing. Run the relevant Linux gates before handoff, then build and smoke-test the exact iOS archive on macOS and a physical device.
+
+The [2.1.3 source release](reports/releases/IOS_LINUXKIT_2.1.3.md) changes load-gadget stream dispatch, not this boundary. Check precise load faults, signal return, load/branch fusion, foreground/background transitions and sustained computation on the intended device build. Its Linux timing results do not establish iOS latency, thermals or battery use.
