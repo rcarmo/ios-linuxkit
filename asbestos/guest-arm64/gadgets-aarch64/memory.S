@@ -530,9 +530,11 @@
  */
 
 // LDR Xd, [Xn, #imm] - fast path (rn!=31, rd!=31)
+// Stream: [gadget addr][rd | rn<<8 | offset<<16][precise LDR guest PC].
+// Save the retry PC here instead of dispatching a separate PC-save gadget.
 .gadget load64_imm_fast
-    ldr x22, [_pc]
-    add _pc, _pc, #8
+    ldp x22, x8, [_pc], #16
+    str x8, [_cpu, #LOCAL_jit_saved_pc]
     ubfx x9, x22, #8, #5       // rn (guaranteed != 31)
     lsr x10, x22, #16           // offset (unsigned)
     add x11, _cpu, #CPU_x0

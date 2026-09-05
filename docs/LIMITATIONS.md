@@ -57,6 +57,8 @@ The guest has a 48-bit virtual address model with 4 KiB pages and lazy reservati
 
 The code tracks guest read, write and execute permissions. Some comments and paths still reflect iSH's historical compatibility-first model, so callers should not treat guest page permissions as a security control against the host process.
 
+In ordinary builds, `kernel/calls.c` may demand-map readable zeros after an unmapped read fault if a mapped neighbour exists within 16 pages (64 KiB). This is separate from the compile-time-disabled broad synthetic recovery mode. A single-page unmap can therefore fail to deliver the SIGSEGV that native Linux would deliver. Targeted V8 recovery paths also remain. The September load-PC test uses an isolated two-page unmap to obtain a real fault; it does not validate second-page-only faults or general `PROT_NONE` enforcement. See the [dated investigation](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md).
+
 ## Host differences
 
 Linux and Darwin use different signal frames, polling facilities, socket behaviours, filesystem metadata and synchronisation APIs. The platform layer covers named seams, but some conditional code remains in socket, polling, native-offload and lock paths.
@@ -81,7 +83,7 @@ Dated reports under `docs/reports/` record their original rootfs and tool versio
 
 Historical x86-versus-ARM64 measurements are retained under [`reports/benchmarks/historical/`](reports/benchmarks/historical/). They were collected on earlier source, host and rootfs combinations. Use `make perf-bench` or `make test-arm64-node-bun-perf` for a current comparison and report the host, revision, rootfs, run count and percentile method.
 
-Executor statistics are diagnostic counters. They do not establish user-visible speed without elapsed-time and workload measurements.
+Executor statistics are diagnostic counters. They do not establish user-visible speed without elapsed-time and workload measurements. The [September load-dispatch pass](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) measured modest Linux compute gains against 2.1.2; shell startup remained noisy. Do not add percentages from separate optimisation passes or extrapolate them to iOS.
 
 ## Release tooling
 

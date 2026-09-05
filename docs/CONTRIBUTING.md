@@ -40,6 +40,8 @@ Memory, signal, synchronisation and translated-execution changes also need the d
 
 A timeout, safety valve, unexpected diagnostic or skipped row is not a pass. Record package and rootfs failures separately from emulator results.
 
+For performance-only changes, the correctness fixture should pass both the baseline and candidate; use a deliberate negative mutation to show it detects the invariant being protected, then restore and rebuild. Keep paired timing separate from correctness runs, use identical commands and input bytes, and reject changes whose benefit does not repeat. Do not mask a native-oracle failure or broaden a passing-test claim beyond the paths actually exercised.
+
 ## Documentation
 
 The maintained guides describe current `master`:

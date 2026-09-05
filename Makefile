@@ -34,6 +34,7 @@ help:
 	@echo "                                      Run coverage against debug binary"
 	@echo "  make test-arm64-fcvt-vector        Run focused AdvSIMD FP widen/narrow conversions"
 	@echo "  make test-arm64-proc-mem-seek      Run /proc/<pid>/mem native seek-semantics regression"
+	@echo "  make test-arm64-load64-fault-pc    Run precise-PC load/retry regression gate"
 	@echo "  make test-arm64-internal-continue-fixtures"
 	@echo "                                      Run opt-in ARM64 internal-continue first-call-site fixtures"
 	@echo "  make test-arm64-cli-corner-smoke   Run optional CLI/TUI/network/container corner-case smoke tests"
@@ -162,6 +163,12 @@ test-arm64-poke-stress: build-arm64-linux $(DEBIAN_ROOTFS_DIR)
 	CC="$(CC)" ISH_BIN="$(abspath $(RELEASE_BUILD_DIR))/ish" \
 	ROOTFS="$(DEBIAN_ROOTFS_DIR)" \
 	./tests/arm64/signals/run-poke-stress.sh
+
+.PHONY: test-arm64-load64-fault-pc
+test-arm64-load64-fault-pc: build-arm64-linux
+	ISH_BIN="$(CURDIR)/$(RELEASE_BUILD_DIR)/ish" \
+	ROOTFS="$(DEBIAN_ROOTFS_DIR)" \
+	./tests/arm64/loadstore/run-load64-fault-pc.sh
 
 .PHONY: test-arm64-internal-continue-fixtures
 test-arm64-internal-continue-fixtures: build-arm64-linux

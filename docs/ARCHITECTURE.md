@@ -55,7 +55,9 @@ Large lazy reservations record ranges and permissions without allocating every p
 
 A host `SIGSEGV` or `SIGBUS` can occur inside a memory gadget when a guest access needs copy-on-write, stack growth or page materialisation. Faultable operations save their guest instruction address in `fiber_frame::jit_saved_pc`. The AArch64 host signal adapter in `platform/host_context_aarch64.h` redirects execution to `jit_crash_trampoline`; the dispatch loop resolves the guest fault and retries that instruction.
 
-The precise saved address prevents earlier instructions in the same block from executing twice. The broad synthetic read-fault fallback is compiled only with `ENABLE_ARM64_READ_FAULT_RECOVERY` and is disabled in ordinary builds.
+The precise saved address prevents earlier instructions in the same block from executing twice. Normal-register unsigned-immediate `LDR X` saves that address inside `load64_imm_fast`, consuming `[operands][guest PC]` together instead of dispatching a separate PC-save gadget. Its LDR+CBZ/CBNZ fusion already saves the LDR PC internally; other memory forms retain their existing saves. Operand-stream producers and consumers must change together.
+
+A separate broad synthetic read-fault fallback is compiled only with `ENABLE_ARM64_READ_FAULT_RECOVERY` and is disabled in ordinary builds. This does **not** disable all compatibility recovery: `kernel/calls.c` still demand-maps readable zeros for an unmapped read page with a mapped neighbour within 16 pages, and retains targeted V8 recovery paths. These can suppress guest faults that native Linux would deliver. See [limitations](LIMITATIONS.md#memory-and-code-protection) and the [load-PC evidence](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md).
 
 ## Userspace kernel
 

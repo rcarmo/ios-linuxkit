@@ -21,6 +21,7 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | Gate | Command | Scope |
 |---|---|---|
 | AdvSIMD FP conversions | `CC=clang make test-arm64-fcvt-vector` | Native AArch64 oracle plus guest widening/narrowing, FP state and decoder masks. |
+| Precise load fault PC | `CC=clang make test-arm64-load64-fault-pc` | Native AArch64 oracle plus 18 guest LDR/CBZ/CBNZ cases: alignment, split loads, exact signal PC and retry state after isolated unmap/remap. |
 | CPU poke delivery | `CC=clang make test-arm64-poke-stress` | Native oracle and five guest repetitions of acknowledged signals to a compute-bound process. |
 | Full-width seeks | `CC=clang make test-arm64-lseek-width` | Static raw-syscall/libc boundary oracle and guest Python sparse-file integration (Debian rootfs with Python required). |
 | proc mem seeks | `CC=clang make test-arm64-proc-mem-seek` | One static fixture natively and under iSH; checks `/proc/<pid>/mem` negative, wrapping, `SEEK_SET`/`SEEK_CUR` and rejected `SEEK_END` semantics. |
@@ -76,7 +77,16 @@ tests/arm64/proc/
 tests/arm64/signals/
 ```
 
-They cover CAS pairs, exclusive monitor clearing, exclusive widths, pair exclusives, AdvSIMD floating-point conversions, `LDPSW`, procfs and full-width file seek semantics, CPU poke delivery and per-thread alternate signal stacks. New low-level work should add a similarly small fixture and include it in a repeatable script or runtime row.
+They contain fixtures for CAS pairs, exclusive monitor clearing, exclusive widths, pair exclusives, AdvSIMD floating-point conversions, `LDPSW`, precise LDR fault/retry PCs, procfs and full-width file seek semantics, CPU poke delivery and per-thread alternate signal stacks. Presence of a fixture is not a passing result; see the current exclusions below. New low-level work should add a similarly small fixture and include it in a repeatable script or runtime row.
+
+The load-PC gate requires a prepared Debian fakefs and a native AArch64 Linux host with 4 KiB pages. Run the debug variant directly:
+
+```sh
+CC=clang ISH_BIN="$PWD/build-arm64-linux-debug/ish" \
+  tests/arm64/loadstore/run-load64-fault-pc.sh
+```
+
+The fixture unmaps both isolated pages before each fault. Its cross-page case checks a first-page fault and successful split access after remapping, not a second-page-only fault or `PROT_NONE` enforcement. A wrong-saved-PC negative mutation must fail; the September pass recorded exit 40, restored the source, rebuilt and confirmed a pass.
 
 A focused fixture should test architectural edge cases relevant to the instruction:
 
@@ -122,10 +132,14 @@ When a broad row fails, rerun its exact guest command with a bounded timeout. Pr
 
 The [5 September seek investigation](reports/audits/ARM_LINUX_LSEEK_2026-09-05.md) records `a5d571f2`: a guest Python sparse-file failure reduced to a raw-syscall boundary fixture, with before/after release and debug results. The [CPU poke benchmark](reports/benchmarks/ARM_LINUX_POKE_2026-09-05.md) records the candidate committed as `e1417b6e`: 30 controlled compute pairs, 1.5–2.2% median improvement across two series, no demonstrated startup/I/O benefit, and acknowledged-signal stress coverage. [Source release 2.1.2](reports/releases/IOS_LINUXKIT_2.1.2.md) records its release gates.
 
-Two pre-existing failures from that run remain open:
+The [load-dispatch investigation](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) records the second pass against 2.1.2: 2.65% and 1.86% compute median reductions, 23/30 faster pairs, and a rejected non-repeatable TLB candidate. Native/baseline/release/debug exact-PC fixtures passed; no iOS speedup is inferred.
+
+Two pre-existing failures from the earlier run remain open:
 
 - Debian package bootstrap: `detect_platform()` retains a blank line after removing the status marker and selects Alpine's `build-base`; the broad suite stops after four base rows, before C coverage.
 - The glibc per-thread alternate-stack fixture exits during `pthread_create` because `clone3` returns `EINVAL`; native execution passes. Guest alternate-stack behaviour is not exercised by that failed run.
+
+The second pass additionally found native SIGBUS (135) in `tests/arm64/atomics/ldxp-stlxp.c` with `clang -O2 -static -march=armv8.1-a+lse`. It is not counted as guest coverage. CAS128, CLREX, exclusive-width and LDPSW fixtures passed native/release/debug; they do not replace the blocked broad suite. The near-neighbour read-fault workaround is documented in [LIMITATIONS.md](LIMITATIONS.md#memory-and-code-protection).
 
 The broad runtime suite depends on package-manager workers and live repositories. A package bootstrap failure precedes emulator rows and is recorded as an infrastructure failure, not an emulator pass or regression. Older reports under `reports/` apply only to the code and environment they name.
 

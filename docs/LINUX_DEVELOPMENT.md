@@ -12,7 +12,9 @@ The Linux command-line build requires an AArch64 host because its gadget files c
 | RAM | 16 GB class; about 14 GiB visible to Linux |
 | Host architecture | AArch64 |
 | OS | Debian Trixie |
-| Compiler used by the July 2026 audit | Clang 19.1.7 |
+| Compiler used by the July audit and September source-release validation | Clang 19.1.7 |
+| September validation kernel | `6.6.89-cix` (AArch64) |
+| Workspace storage | NVMe, ext4 |
 
 The board details identify the measured host; they are not minimum requirements. The `test-arm64-fcvt-vector` gate also uses the host CPU as an AArch64 floating-point oracle.
 
@@ -96,7 +98,7 @@ The supported Clang build uses Clang's integrated assembler. GNU `as` rejects na
 ./build-arm64-linux/ish -r / /bin/echo hello
 ```
 
-This is useful for a small smoke test when the host contains AArch64 Linux programs. With `/` as the root, the current launcher can print `init: failed to chmod /dev/shm: Operation not permitted` because it attempts to enforce guest `/dev/shm` permissions on the host mount; the command still exits with the guest program's status. Realfs exposes the selected host tree, so use a restricted directory for untrusted guest commands.
+This is useful for a small smoke test when the host contains AArch64 Linux programs. With `/` as the root, the current launcher can print `init: failed to chmod /dev/shm: Operation not permitted` because it attempts to enforce guest `/dev/shm` permissions on the host mount; the command still exits with the guest program's status. Realfs exposes the selected host tree. Prefer a restricted directory for ordinary tests; this runtime is not a security boundary for hostile guest code, even with a restricted realfs root.
 
 Common command-line options implemented by `xX_main_Xx.h` are:
 
@@ -152,6 +154,28 @@ CC=clang make test-arm64-fcvt-vector
 ```
 
 The target uses `debian-arm64-fakefs` by default and creates that fakefs through the Makefile recipe when absent. The fixture itself is static and needs no guest compiler. It checks `FCVTN`/`FCVTN2`, `FCVTL`/`FCVTL2` and `FCVTXN`/`FCVTXN2`, including guest rounding mode, cumulative floating-point exceptions, vector-half semantics and register aliasing.
+
+## Precise load-PC and paired performance tests
+
+With a prepared `debian-arm64-fakefs`, run the native-oracle and guest retry gate:
+
+```sh
+CC=clang make test-arm64-load64-fault-pc
+CC=clang ISH_BIN="$PWD/build-arm64-linux-debug/ish" \
+  tests/arm64/loadstore/run-load64-fault-pc.sh
+```
+
+This static fixture tests exact LDR signal PCs and retry state. Its isolated two-page unmap avoids the existing nearby-page recovery workaround; it does not establish general page-permission conformance. See [VALIDATION.md](VALIDATION.md#focused-low-level-fixtures).
+
+For paired shell/Python startup, compute and temporary-file timing:
+
+```sh
+PERF_CPU=11 bun tests/arm64/perf-poke.ts \
+  /absolute/path/ish-before /absolute/path/ish-after \
+  debian-arm64-fakefs /tmp/paired-samples.json 15
+```
+
+Use an available CPU on your host. The script requires Bun and guest Python, starts a fresh emulator each sample, alternates order, checks outputs and rejects `ISH_*` diagnostic overrides. It does not change CPU policy. Record frequency settings, workload, binary hashes and spread; a profile alone is not performance evidence.
 
 ## Diagnostics
 

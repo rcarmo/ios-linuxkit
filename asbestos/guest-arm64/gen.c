@@ -1149,11 +1149,6 @@ int gen_step(struct gen_state *state, struct tlb *tlb) {
 
     enum arm64_insn_type type = arm64_classify_insn(insn);
 
-    if (type == INSN_LD_ST) {
-        gen(state, (unsigned long) gadget_set_jit_saved_pc);
-        gen(state, state->orig_ip);
-    }
-
     int result;
     switch (type) {
         case INSN_DP_IMM:
@@ -2934,6 +2929,16 @@ static int gen_branch(struct gen_state *state, uint32_t insn) {
  * Loads and Stores
  */
 static int gen_ldst(struct gen_state *state, uint32_t insn) {
+    // Normal-register LDR X unsigned-immediate saves its retry PC in the load
+    // gadget itself (as does its LDR+CBZ/CBNZ fusion). Avoid a separate gadget
+    // dispatch and code-stream pointer for this common case. All other memory
+    // instructions retain the standalone precise-PC save.
+    bool inline_load64_pc = (insn & 0xffc00000) == 0xf9400000 &&
+                           ((insn >> 5) & 0x1f) != 31 && (insn & 0x1f) != 31;
+    if (!inline_load64_pc) {
+        gen(state, (unsigned long) gadget_set_jit_saved_pc);
+        gen(state, state->orig_ip);
+    }
     uint32_t op0 = (insn >> 28) & 0xf;
 
     // Atomic memory operations (LSE): LDADD/LDCLR/LDEOR/LDSET/LDUMAX/LDUMIN/LDSMAX/LDSMIN/SWP
@@ -3197,6 +3202,8 @@ static int gen_ldst(struct gen_state *state, uint32_t insn) {
                 }
                 gen(state, (unsigned long) gadget);
                 gen(state, fused_param);
+                if (gadget == gadget_load64_imm_fast)
+                    gen(state, state->orig_ip);
             } else {
                 void *gadget;
                 switch (size) {
