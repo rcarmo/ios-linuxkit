@@ -155,6 +155,11 @@ void handle_interrupt(int interrupt) {
                 // restored x0 value (e.g., errno sign-extension).
                 if (syscall_num == 139 /* rt_sigreturn */) {
                     // x0 already set by restore_sigcontext, skip writeback
+                } else if (syscall_num == 62 /* lseek */) {
+                    // sys_lseek64 already returns a full-width value (including
+                    // sign-extended errors). Valid offsets 0xfffff001..0xffffffff
+                    // must not be mistaken for zero-extended 32-bit errnos.
+                    cpu->regs[0] = (uint64_t)result;
                 } else {
                     // ARM64 Linux ABI: return value in x0. Errors are negative
                     // (-1 to -4095). Success values are 0 or positive (up to 48-bit
