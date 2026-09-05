@@ -1,6 +1,6 @@
 # Versioning and releases
 
-The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.1.1**, Apple build **807**, tagged as `v2.1.1` after validation.
+The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.1.2**, Apple build **808**, tagged as `v2.1.2` after validation. See the [2.1.2 source release record](reports/releases/IOS_LINUXKIT_2.1.2.md).
 
 ## Version sources
 
@@ -29,7 +29,7 @@ Increment the Apple build number for every uploaded build, including rebuilds of
 1. Change `MARKETING_VERSION` in `app/AppARM64.xcconfig`.
 2. Change every `CURRENT_PROJECT_VERSION` entry in `iSH.xcodeproj/project.pbxproj` to the same new integer.
 3. Update the current version in `README.md`, `docs/IOS_APPLICATION.md` and this file.
-4. Add a dated report under `docs/reports/releases/` only when an archive or distribution run has produced evidence worth retaining.
+4. Add a dated report under `docs/reports/releases/` for source-release validation, an archive or a distribution run. State which kind of evidence it records; source validation alone does not establish iOS archive or device behaviour.
 
 Verify the fields:
 
@@ -48,6 +48,7 @@ On the AArch64 Linux validation host:
 CC=clang make build-arm64-linux-all
 CC=clang make test-arm64-fcvt-vector
 CC=clang make test-arm64-proc-mem-seek
+CC=clang make test-arm64-lseek-width test-arm64-poke-stress
 make check-docs
 git diff --check
 git status --short
@@ -63,17 +64,17 @@ Commit the version, documentation and release evidence together. Push the commit
 
 ```sh
 git push origin master
-git tag -a v2.1.1 -m 'ios-linuxkit 2.1.1'
-git push origin v2.1.1
+git tag -a v2.1.2 -m 'ios-linuxkit 2.1.2'
+git push origin v2.1.2
 ```
 
-Replace `2.1.1` with the version in `app/AppARM64.xcconfig`. Verify all three references:
+Replace `2.1.2` with the version in `app/AppARM64.xcconfig`. Verify all three references:
 
 ```sh
 git rev-parse HEAD
 git rev-parse origin/master
-git rev-list -n 1 v2.1.1
-git ls-remote origin refs/heads/master refs/tags/v2.1.1
+git rev-list -n 1 v2.1.2
+git ls-remote origin refs/heads/master refs/tags/v2.1.2 'refs/tags/v2.1.2^{}'
 ```
 
 A Git tag records source provenance. It does not prove that an iOS archive was signed, installed or uploaded.

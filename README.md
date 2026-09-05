@@ -4,7 +4,7 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
-The current source version is **2.1.1** with Apple build number **807**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. All executable host instructions come from the built application; the interpreter allocates only data for translated programs.
+The current source version is **2.1.2** with Apple build number **808**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. All executable host instructions come from the built application; the interpreter allocates only data for translated programs.
 
 ## What is in the repository
 
@@ -61,6 +61,8 @@ curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-min
 | Check documentation links | `make check-docs` |
 | Test AdvSIMD FP widening and narrowing | `CC=clang make test-arm64-fcvt-vector` |
 | Test `/proc/<pid>/mem` seek semantics | `CC=clang make test-arm64-proc-mem-seek` |
+| Test full-width seeks and Python sparse files | `CC=clang make test-arm64-lseek-width` |
+| Test signal delivery to guest computation | `CC=clang make test-arm64-poke-stress` |
 | Run staged runtime coverage | `make test-arm64-runtime-coverage` |
 | Run coverage with the debug binary | `make test-arm64-runtime-coverage-debug` |
 | Run CLI corner cases | `make test-arm64-cli-corner-smoke` |
@@ -70,6 +72,8 @@ curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-min
 The runtime and CLI targets can install packages into their fakefs. Use a disposable copy when package state matters. Reports are written to `REPORT_DIR`, which defaults to `/workspace/tmp`.
 
 [The July 2026 OpenMinis audit](docs/reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records the repository-wide comparison at `35dac743` and the AdvSIMD conversion follow-up at `40f1bf40`. The follow-up added `FCVTN`, `FCVTN2`, `FCVTXN` and `FCVTXN2`; clean Clang release and debug builds and the native-oracle/guest fixture passed. The earlier broad suite reached 82/83 because the tested rootfs Clojure package lacked `clojure.main`.
+
+[Source release 2.1.2](docs/reports/releases/IOS_LINUXKIT_2.1.2.md) fixes full-width ARM64 `lseek` returns and reduces unnecessary atomic poke exchanges. Two controlled ARM Linux Python compute series measured 1.5–2.2% median improvement; startup and I/O showed no demonstrated benefit. The release notes record the remaining package-harness and `clone3` blockers and required iOS checks.
 
 ## Documentation
 

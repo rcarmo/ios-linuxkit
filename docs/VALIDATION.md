@@ -63,19 +63,20 @@ Cold Go caches can exceed the ordinary timeout because Alpine may ship standard-
 
 Read the script for the exact current rows. A number in a dated report applies only to that script revision, binary, rootfs and package state.
 
-## Focused instruction fixtures
+## Focused low-level fixtures
 
 Standalone source fixtures live under:
 
 ```text
 tests/arm64/atomics/
 tests/arm64/fp/
+tests/arm64/fs/
 tests/arm64/loadstore/
 tests/arm64/proc/
 tests/arm64/signals/
 ```
 
-They cover CAS pairs, exclusive monitor clearing, exclusive widths, pair exclusives, AdvSIMD floating-point conversions, `LDPSW`, procfs seek semantics and per-thread alternate signal stacks. New low-level work should add a similarly small fixture and include it in a repeatable script or runtime row.
+They cover CAS pairs, exclusive monitor clearing, exclusive widths, pair exclusives, AdvSIMD floating-point conversions, `LDPSW`, procfs and full-width file seek semantics, CPU poke delivery and per-thread alternate signal stacks. New low-level work should add a similarly small fixture and include it in a repeatable script or runtime row.
 
 A focused fixture should test architectural edge cases relevant to the instruction:
 
@@ -113,11 +114,18 @@ When a broad row fails, rerun its exact guest command with a bounded timeout. Pr
 
 ## Current evidence
 
-[`reports/audits/OPENMINIS_AUDIT_2026-07-20.md`](reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records two revisions:
+[`reports/audits/OPENMINIS_AUDIT_2026-07-20.md`](reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records the July audit and subsequent follow-ups:
 
 - at `35dac743`, Clang release and debug builds, all 47 C/ARM64 rows, and focused atomic, timer, epoll, `madvise`, signal and pidfd regressions passed; two broad release runs reached 82/83 because the tested Clojure package lacked `clojure.main`;
 - at `40f1bf40`, clean Clang release and debug builds and `test-arm64-fcvt-vector` passed for `FCVTN`, `FCVTN2`, `FCVTL`, `FCVTL2`, `FCVTXN` and `FCVTXN2`;
 - the 2.1.1 follow-up preserves a byte-identical static `/proc/self/mem` fixture: `v2.1.0` crashes the host process at PC `0x0`, while the fixed release and debug binaries pass the native seek matrix.
+
+The [5 September seek investigation](reports/audits/ARM_LINUX_LSEEK_2026-09-05.md) records `a5d571f2`: a guest Python sparse-file failure reduced to a raw-syscall boundary fixture, with before/after release and debug results. The [CPU poke benchmark](reports/benchmarks/ARM_LINUX_POKE_2026-09-05.md) records the candidate committed as `e1417b6e`: 30 controlled compute pairs, 1.5–2.2% median improvement across two series, no demonstrated startup/I/O benefit, and acknowledged-signal stress coverage. [Source release 2.1.2](reports/releases/IOS_LINUXKIT_2.1.2.md) records its release gates.
+
+Two pre-existing failures from that run remain open:
+
+- Debian package bootstrap: `detect_platform()` retains a blank line after removing the status marker and selects Alpine's `build-base`; the broad suite stops after four base rows, before C coverage.
+- The glibc per-thread alternate-stack fixture exits during `pthread_create` because `clone3` returns `EINVAL`; native execution passes. Guest alternate-stack behaviour is not exercised by that failed run.
 
 The broad runtime suite depends on package-manager workers and live repositories. A package bootstrap failure precedes emulator rows and is recorded as an infrastructure failure, not an emulator pass or regression. Older reports under `reports/` apply only to the code and environment they name.
 

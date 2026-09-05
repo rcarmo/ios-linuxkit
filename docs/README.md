@@ -21,9 +21,10 @@ Reports record a result at a named date or revision. Paths, package versions and
 | Directory | Contents |
 |---|---|
 | [reports/audits/](reports/audits/) | Source and upstream comparison audits. |
+| [reports/benchmarks/ARM_LINUX_POKE_2026-09-05.md](reports/benchmarks/ARM_LINUX_POKE_2026-09-05.md) | CPU poke profiling, paired ARM Linux measurements and limitations. |
 | [reports/benchmarks/game/](reports/benchmarks/game/) | Benchmarks Game harness and per-language results. |
 | [reports/benchmarks/historical/](reports/benchmarks/historical/) | Retired x86/ARM64 compatibility and performance comparisons. |
-| [reports/releases/](reports/releases/) | Previous production baseline and staging records. |
+| [reports/releases/](reports/releases/) | Source-release validation, production baseline and staging records; latest: [2.1.2](reports/releases/IOS_LINUXKIT_2.1.2.md). |
 | [reports/workloads/](reports/workloads/) | Workload investigations such as `go-gte`. |
 
 ## Provenance
