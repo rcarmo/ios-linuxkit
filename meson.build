@@ -6,6 +6,10 @@ if cc.get_id() == 'clang'
     add_project_arguments('-Wimplicit-fallthrough', '-Wtautological-constant-in-range-compare', language: 'c')
 endif
 
+if host_machine.system() == 'darwin' and host_machine.cpu_family() == 'aarch64'
+    add_project_arguments('-D_XOPEN_SOURCE=700', '-D_DARWIN_C_SOURCE', language: 'c')
+endif
+
 if get_option('b_sanitize').split(',').contains('undefined')
     add_project_arguments('-fno-sanitize=alignment', language: 'c')
 endif
