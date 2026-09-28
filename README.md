@@ -4,7 +4,7 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
-The current source version is **2.1.3** with Apple build number **809**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. All executable host instructions come from the built application; the interpreter allocates only data for translated programs.
+The current source version is **2.2.0** with Apple build number **810**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. All executable host instructions come from the built application; the interpreter allocates only data for translated programs.
 
 ## What is in the repository
 
@@ -64,6 +64,7 @@ curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-min
 | Test full-width seeks and Python sparse files | `CC=clang make test-arm64-lseek-width` |
 | Test signal delivery to guest computation | `CC=clang make test-arm64-poke-stress` |
 | Test precise load fault-PC and retry state | `CC=clang make test-arm64-load64-fault-pc` |
+| Test imported correctness, lifetime and failure handling | `CC=clang make test-arm64-upstream` |
 | Run staged runtime coverage | `make test-arm64-runtime-coverage` |
 | Run coverage with the debug binary | `make test-arm64-runtime-coverage-debug` |
 | Run CLI corner cases | `make test-arm64-cli-corner-smoke` |
@@ -73,6 +74,8 @@ curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-min
 The runtime and CLI targets can install packages into their fakefs. Use a disposable copy when package state matters. Reports are written to `REPORT_DIR`, which defaults to `/workspace/tmp`.
 
 [The July 2026 OpenMinis audit](docs/reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records the repository-wide comparison at `35dac743` and the AdvSIMD conversion follow-up at `40f1bf40`. The follow-up added `FCVTN`, `FCVTN2`, `FCVTXN` and `FCVTXN2`; clean Clang release and debug builds and the native-oracle/guest fixture passed. The earlier broad suite reached 82/83 because the tested rootfs Clojure package lacked `clojure.main`.
+
+[Source release 2.2.0](docs/reports/releases/IOS_LINUXKIT_2.2.0.md) adopts the validated September OpenMinis imports: instruction/syscall correctness, precise signal-interruptible waits, task and filesystem lifetime fixes, allocation-failure handling, balanced anonymous-memory accounting and native-offload selection safeguards. Fresh release/debug builds pass all six focused gates, 14 internal-continuation checks per build and four supplemental native-oracle comparisons. A focused Linux open/fstat/close benchmark measured about **14% lower median time** in the imported candidate, not an application-wide or iOS speedup. The [complete import audit](docs/reports/audits/OPENMINIS_IMPORT_2026-09-28.md) records all 55 upstream commit dispositions, exclusions and unresolved validation limits.
 
 [Source release 2.1.3](docs/reports/releases/IOS_LINUXKIT_2.1.3.md) reduces common 64-bit load dispatch overhead while preserving the exact fault retry PC. Two controlled ARM Linux Python compute series against 2.1.2 measured **1.9–2.6% median improvement**, with 23/30 faster pairs; shell startup remained noisy. Fresh release/debug gates include an 18-case native-oracle fault/retry fixture. The release notes record the existing read-fault workaround, native fixture and broad-suite limitations, and outstanding iOS validation. The preceding [2.1.2 release](docs/reports/releases/IOS_LINUXKIT_2.1.2.md) contains the full-width `lseek` and CPU poke changes; percentages from separate passes are not cumulative measurements.
 
