@@ -734,6 +734,7 @@ static void *mem_ptr_nofault(struct mem *mem, addr_t addr, int type) {
 void *mem_ptr(struct mem *mem, addr_t addr, int type) {
 #ifndef NDEBUG
     void *old_ptr = mem_ptr_nofault(mem, addr, type); // just for an assert
+    bool remapped = false;
 #endif
 
     page_t page = PAGE(addr);
@@ -767,6 +768,9 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
         // READ from their task_run_current, so write_wrlock deadlocks.
         // Use trylock: if contended, return NULL for INT_GPF retry from
         // handle_interrupt where the lock upgrade is safe.
+#ifndef NDEBUG
+        remapped = true;
+#endif
         read_wrunlock(&mem->lock);
         if (in_jit) {
             if (!write_wrtrylock(&mem->lock)) {
@@ -799,6 +803,9 @@ check_reservation: ;
         struct mem_reservation *res = mem_find_reservation(mem, page);
         if (res == NULL)
             return NULL;
+#ifndef NDEBUG
+        remapped = true;
+#endif
         read_wrunlock(&mem->lock);
         if (in_jit) {
             if (!write_wrtrylock(&mem->lock)) {
@@ -841,6 +848,9 @@ have_entry:
             void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
 
+#ifndef NDEBUG
+            remapped = true;
+#endif
             read_wrunlock(&mem->lock);
             write_wrlock(&mem->lock);
             // Re-fetch entry after lock upgrade — another thread may have
@@ -861,7 +871,10 @@ have_entry:
 
     void *ptr = mem_ptr_nofault(mem, addr, type);
 #ifndef NDEBUG
-    assert(old_ptr == NULL || old_ptr == ptr || type == MEM_WRITE_PTRACE);
+    // OpenMinis bea892fc/57c1f142: releasing mem->lock permits another
+    // mapper or CoW resolver to replace backing. Equality is only meaningful
+    // while the original read-lock interval remained uninterrupted.
+    assert(remapped || old_ptr == NULL || old_ptr == ptr || type == MEM_WRITE_PTRACE);
 #endif
     return ptr;
 }

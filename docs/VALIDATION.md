@@ -25,6 +25,7 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | CPU poke delivery | `CC=clang make test-arm64-poke-stress` | Native oracle and five guest repetitions of acknowledged signals to a compute-bound process. |
 | Full-width seeks | `CC=clang make test-arm64-lseek-width` | Static raw-syscall/libc boundary oracle and guest Python sparse-file integration (Debian rootfs with Python required). |
 | proc mem seeks | `CC=clang make test-arm64-proc-mem-seek` | One static fixture natively and under iSH; checks `/proc/<pid>/mem` negative, wrapping, `SEEK_SET`/`SEEK_CUR` and rejected `SEEK_END` semantics. |
+| Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection and offload policy/exec guards. |
 | Release runtime | `make test-arm64-runtime-coverage` | Shell, package manager, C fixtures and language runtimes. |
 | Debug runtime | `make test-arm64-runtime-coverage-debug` | Same suite with the debug binary. |
 | CLI corner cases | `make test-arm64-cli-corner-smoke` | TUI, DNS, HTTPS, Git, Docker probes and command-line packages. |
@@ -75,6 +76,7 @@ tests/arm64/fs/
 tests/arm64/loadstore/
 tests/arm64/proc/
 tests/arm64/signals/
+tests/arm64/upstream/
 ```
 
 They contain fixtures for CAS pairs, exclusive monitor clearing, exclusive widths, pair exclusives, AdvSIMD floating-point conversions, `LDPSW`, precise LDR fault/retry PCs, procfs and full-width file seek semantics, CPU poke delivery and per-thread alternate signal stacks. Presence of a fixture is not a passing result; see the current exclusions below. New low-level work should add a similarly small fixture and include it in a repeatable script or runtime row.
@@ -133,6 +135,17 @@ When a broad row fails, rerun its exact guest command with a bounded timeout. Pr
 The [5 September seek investigation](reports/audits/ARM_LINUX_LSEEK_2026-09-05.md) records `a5d571f2`: a guest Python sparse-file failure reduced to a raw-syscall boundary fixture, with before/after release and debug results. The [CPU poke benchmark](reports/benchmarks/ARM_LINUX_POKE_2026-09-05.md) records the candidate committed as `e1417b6e`: 30 controlled compute pairs, 1.5–2.2% median improvement across two series, no demonstrated startup/I/O benefit, and acknowledged-signal stress coverage. [Source release 2.1.2](reports/releases/IOS_LINUXKIT_2.1.2.md) records its release gates.
 
 The [load-dispatch investigation](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) records the second pass against 2.1.2: 2.65% and 1.86% compute median reductions, 23/30 faster pairs, and a rejected non-repeatable TLB candidate. Native/baseline/release/debug exact-PC fixtures passed; no iOS speedup is inferred. [Source release 2.1.3](reports/releases/IOS_LINUXKIT_2.1.3.md) records fresh release/debug builds, all five focused gates and four additional native-oracle fixture comparisons per build.
+
+The [September OpenMinis import](reports/audits/OPENMINIS_IMPORT_2026-09-28.md)
+records the complete 55-commit disposition, actual-allocation failure tests,
+negative anonymous-ledger reproducer, bounded lifetime gates and measured
+filesystem result. Both builds pass the expanded upstream gate and the five
+preservation gates. Set `EVIDENCE_DIR` to retain the upstream runner's artifacts.
+Minimal rootfs lanes can run internal-continuation fixtures with
+`HOST_CC=clang make ROOTFS_DIR="$PWD/debian-arm64-fakefs" test-arm64-internal-continue-fixtures`
+on native AArch64; this compiles the same static fixture on the host, not in the
+guest. The heavy procfs shell race remains an unresolved timeout; Darwin/iOS
+and ASan runtime validation are not established by the import.
 
 Two pre-existing failures from the earlier run remain open:
 

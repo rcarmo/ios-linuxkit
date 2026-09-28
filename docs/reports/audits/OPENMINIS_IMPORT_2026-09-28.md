@@ -50,8 +50,8 @@ full-width lseek, atomic poke and inline precise-PC improvements. Our crash
 field offsets and CLI argument bounds already address overlapping upstream work.
 Do not import the reverted poll/epoll changes as if they survived on master.
 
-Further lifecycle, OOM, sleep, accounting and filesystem improvements remain
-under review. Memory/fork governor policy and Apple 16 KiB clustering need
+Lifecycle, OOM, sleep, accounting and filesystem imports are recorded below.
+Memory/fork governor policy and Apple 16 KiB clustering are excluded pending
 separate assessment; Linux evidence cannot establish iOS footprint behaviour.
 No macOS build, signing, archive or device validation is claimed.
 
@@ -142,3 +142,107 @@ the runner now accepts explicit HOST_CC=clang to build the same static fixture
 on native AArch64 and stops immediately on setup failures. No skipped tests
 counted as passes. Reports: `ish-arm64-internal-continue-fixtures-20260928-124529.md`
 and `...-124530.md` in the evidence directory.
+
+## Final source-audit follow-up
+
+`bea892fc`/`57c1f142`: keep the debug pointer-equality invariant only across an
+uninterrupted memory read-lock interval. Our lock-upgrade algorithm is retained;
+mark all three local release/reacquire paths, including lazy reservations. This
+is an assertion-scope correction, not a stale-pointer repair. Actual-kernel
+CoW/lazy fixtures and debug poke stress pass; no new race reproducer is claimed.
+
+## Complete disposition ledger
+
+All **55 non-merge commits** in the reviewed 69-commit range are accounted for
+below. Merge commits only connect these changes. “Deferred” is an explicit
+exclusion from this import, not a tested fix waiting to be committed.
+
+| Commit | Disposition and reason |
+|---|---|
+| `eb8f2b07` | Not applicable: local sync layer has no upstream slow-lock tracing overhead to compile out. |
+| `74d6a0df` | Imported archive root S_IFDIR, tranche 1. |
+| `a4b5d7e3` | Imported path bounds; host fork-guard policy deferred (no local host admission callback). |
+| `123143f0` | Deferred cooperative in-process abort API: local subprocess forwarding already exists, but is not equivalent. Requires a real handler cancellation contract and Darwin tests; FakeFFmpeg does not supply one. |
+| `359a268d` | Adapted bind-routed stat metadata, tranche 1. |
+| `08eeb259` | Imported ARM64 open flags, tranche 1. |
+| `4f6612d8` | Already present: internal wait timeout is retried; only actual EINTR marks signal interruption. |
+| `f8983200` | Imported O_NOFOLLOW resolution, tranche 1. |
+| `565f4f82` | Imported waitid status decoding, tranche 1. |
+| `2da30b04` | Imported waitid child UID, tranche 1. |
+| `b2f97ac6` | Already superseded by local FPCR/FPSR-aware FCVT vector implementation and gate. |
+| `7e09bf0d` | Selected filesystem/wait matrix imported from final upstream tree; 52 assertions required. |
+| `53739103` | Selected bounded scenario probes imported/adapted; not the 263-package suite or the unresolved procfs shell stress. |
+| `19c690c3` | Imported task allocation lock rollback, tranche 1. |
+| `bea892fc` | Adapted debug-only pointer invariant across local lock upgrades; no upstream locking algorithm copied. |
+| `bf850b26` | Superseded by local /proc/mem full-width native seek implementation and gate. |
+| `c77dd017` | Upstream seek commentary not copied over our deliberately different, documented native-seek semantics. |
+| `57c1f142` | Adapted invariant commentary together with bea892fc. |
+| `f7b0a737` | Already present: crash field offsets use offsetof; stale literal offsets not reintroduced. |
+| `3f6384c7` | Deferred waitpid 1/2/4-second backoff: changes recovery latency for a performance aim; no measured many-waiter gain here. Existing 1-second timeout/retry retained. |
+| `eee7f751` | Deferred fixed cap reduction: device policy, not portable correctness. |
+| `54ab50a5` | Adapted central cap reservation/lazy-commit enforcement in tranche 4; device-derived cap and stack-window policy excluded. |
+| `6320af44` | Not applicable without the host-byte/device-cap conversion; our ledger remains guest pages, not host footprint. |
+| `ce1b4b86` | Deferred Apple host-page clustering; needs 16KiB host/device correctness and footprint evidence. |
+| `1894e94e` | Deferred cluster/anonymous-mmap telemetry tied to that implementation. |
+| `2d0094ad` | Adapted all-path mapping accounting and failure rollback, tranche 4. |
+| `a760a908` | Adapted protection/fork charge predicate, tranche 4. |
+| `6d1178f3` | Deferred footprint governor and hysteresis policy; Linux logical-page tests cannot validate jetsam behaviour. |
+| `601891d4` | Deferred forced Node --single-generation: changes GC behaviour. Existing injected flags retained; local comment mentioning it is not evidence it is enabled. |
+| `ace2cdbf` | Imported FMOV immediate correctness, tranche 1. |
+| `f08572a0` | Adapted JIT OOM and failed thread-start handling with full local rollback and actual-archive injection, tranche 2. |
+| `db38a54e` | Excluded: reverted upstream by 7856dcce; not a surviving fix. |
+| `c36f7dfb` | Excluded: reverted upstream by 7856dcce; not a surviving fix. |
+| `75f1e775` | Deferred CLI footprint-governor wiring, matching governor exclusion. |
+| `7856dcce` | Respect revert by importing neither poll/epoll candidate. |
+| `5d84ecd4` | Imported signal consumption, tranche 1. |
+| `097492fe` | Deferred iOS footprint-governor wiring; no local device validation. |
+| `2d560913` | Excluded app release/deployment metadata; keep v2.1.3/build809 unchanged. |
+| `84770265` | Adapted Mach send-right release to platform/darwin.c, tranche 2. |
+| `e5d82e6c` | Not needed: diagnostic hook interface was not imported; local platform layer builds without it. |
+| `2427e6ea` | Imported POSIX timer delivery, tranche 1. |
+| `3bb6e27e` | Adapted interruptible sleeps, tranche 2. |
+| `b311a744` | Adapted recomputed deadline/remainder loop, tranche 2. |
+| `713e594c` | Excluded unconditional high-volume mm-release diagnostics; not a correctness fix. |
+| `efc8a1ac` | Deferred mm-sequence diagnostic plumbing; not required by retained fixes. |
+| `42ef4fbe` | Excluded shared normalized-path cache: key is path+flags, omits cwd/root/credentials; hit bypasses permission/path traversal. Generation invalidation does not make those contexts equivalent. Our local path walker has no such cache. |
+| `261bcd4e` | Adapted deferred orphan lifecycle and rename replacement, tranche 2; repeated combined filesystem gain measured. |
+| `a1e8b1e2` | Adapted early inode retention/unlocked fstat, tranche 2; concurrent open/unlink passes. |
+| `0e843724` | Deferred trace-gating interface: diagnostics remain noisy, but no separate measured benefit or required host API. |
+| `80e444f1` | Adapted mm unpublication/proc reader locking, tranche 2. |
+| `2d128d7a` | Excluded path-cache/fork counters for upstream CPUTop sampler; absent local consumer/cache. |
+| `a6c35797` | Adapted precise positive sleeps/futex deadlines; upstream short-sleep yield policy rejected. |
+| `3fa66c02` | Only read transaction for noncreating opens retained; cached stat at exec rejected because permission/ownership/size metadata can change between operations. |
+| `e42dccac` | Deferred fork-rate token bucket: admission/performance policy, not required for fork correctness; no measured local workload benefit. |
+| `72dd6aaa` | Adapted generic offload path/env/script safeguards, tranche 3. |
+
+Experimental branches (AOT, HyperJIT/native JIT, networking) were not merged.
+No broad runtime/package pass, ASan pass, long-proc-stress pass, or iOS device
+pass is implied. Remaining known limitations include broad-suite Debian package
+detection, clone3 alternate-stack coverage and the native LDXP/STLXP SIGBUS
+fixture noted in the July audit. The existing task teardown safety-valve design
+is preserved, not certified race-free by these bounded tests.
+
+## Reproduction and publication
+
+```sh
+CC=clang make build-arm64-linux-all
+for build in build-arm64-linux build-arm64-linux-debug; do
+    CC=clang make RELEASE_BUILD_DIR="$build" test-arm64-upstream \
+        test-arm64-lseek-width test-arm64-poke-stress test-arm64-fcvt-vector \
+        test-arm64-proc-mem-seek test-arm64-load64-fault-pc
+    HOST_CC=clang make RELEASE_BUILD_DIR="$build" \
+        ROOTFS_DIR="$PWD/debian-arm64-fakefs" test-arm64-internal-continue-fixtures
+done
+make check-docs
+git diff --check
+```
+
+Final closure repeats all six focused gates on release/debug, plus 14/14
+internal-continuation checks per build. Supplemental CAS128, CLREX/STXR,
+exclusive-width and LDPSW fixtures match native output exactly on both builds.
+`make check-docs` checks 44 Markdown files; diff checks pass. Binary hashes and
+closure logs are retained in the evidence directory.
+
+Set EVIDENCE_DIR to retain upstream-gate logs/binaries; otherwise temporary files
+are removed. Imports are local reviewable commits, no version bump or tag.
+No push of this import series has been performed.
