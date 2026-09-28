@@ -510,7 +510,9 @@ bool pt_is_hole(struct mem *mem, page_t start, pages_t pages) {
     return true;
 }
 
-int pt_map(struct mem *mem, page_t start, pages_t pages, void *memory, size_t offset, unsigned flags) {
+static int pt_map_accounted(struct mem *mem, page_t start, pages_t pages,
+        void *memory, size_t offset, unsigned flags, bool precharged) {
+    (void)precharged; // also buildable with anonymous accounting disabled
     if (memory == MAP_FAILED)
         return errno_map();
 
@@ -540,8 +542,16 @@ int pt_map(struct mem *mem, page_t start, pages_t pages, void *memory, size_t of
         pt->flags = flags;
 
     }
+#if ANON_MMAP_LIMIT_PAGES > 0
+    if (!precharged && anon_page_is_charged(flags))
+        atomic_fetch_add(&anon_page_count, (long)pages);
+#endif
     mem_changed(mem);
     return 0;
+}
+
+int pt_map(struct mem *mem, page_t start, pages_t pages, void *memory, size_t offset, unsigned flags) {
+    return pt_map_accounted(mem, start, pages, memory, offset, flags, false);
 }
 
 int pt_unmap(struct mem *mem, page_t start, pages_t pages) {
@@ -570,7 +580,7 @@ int pt_unmap_always(struct mem *mem, page_t start, pages_t pages) {
         // Decrement per-page for anonymous mappings. This correctly handles
         // partial unmaps (munmap of subset of original mmap region) where the
         // data object's refcount doesn't reach 0 but the guest page is gone.
-        if (pt->flags & P_ANONYMOUS)
+        if (anon_page_is_charged(pt->flags))
             atomic_fetch_sub(&anon_page_count, 1);
 #endif
         mem_pt_del(mem, page);
@@ -598,10 +608,22 @@ int pt_map_nothing(struct mem *mem, page_t start, pages_t pages, unsigned flags)
     if (!(flags & P_READ) && !(flags & P_WRITE) && !(flags & P_EXEC))
         host_prot = PROT_NONE;
     size_t map_size = (size_t)pages * PAGE_SIZE;
-    void *memory = mmap(NULL, map_size, host_prot, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
-    if (memory == MAP_FAILED)
+#if ANON_MMAP_LIMIT_PAGES > 0
+    bool charged = anon_page_is_charged(flags | P_ANONYMOUS);
+    if (charged && !anon_pages_reserve((long)pages))
         return _ENOMEM;
-    return pt_map(mem, start, pages, memory, 0, flags | P_ANONYMOUS);
+#endif
+    void *memory = mmap(NULL, map_size, host_prot, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+    int err = memory == MAP_FAILED ? _ENOMEM :
+        pt_map_accounted(mem, start, pages, memory, 0, flags | P_ANONYMOUS, true);
+#if ANON_MMAP_LIMIT_PAGES > 0
+    // Explicit ownership transfer; no thread-local credit or transient double charge.
+    if (err < 0 && charged)
+        anon_pages_unreserve((long)pages);
+#endif
+    if (err < 0 && memory != MAP_FAILED)
+        munmap(memory, map_size);
+    return err;
 }
 
 // Metadata flags that must be preserved across mprotect — they track
@@ -621,7 +643,7 @@ int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
         if (entry == NULL)
             continue;
         int old_flags = entry->flags;
-        entry->flags = flags | (old_flags & P_META_FLAGS);
+        unsigned new_flags = flags | (old_flags & P_META_FLAGS);
 
         // check if protection is increasing
         if ((flags & ~old_flags) & (P_READ|P_WRITE)) {
@@ -633,6 +655,11 @@ int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
             if (mprotect(data, real_page_size, prot) < 0)
                 return errno_map();
         }
+        entry->flags = new_flags;
+#if ANON_MMAP_LIMIT_PAGES > 0
+        int delta = (int)anon_page_is_charged(new_flags) - (int)anon_page_is_charged(old_flags);
+        atomic_fetch_add(&anon_page_count, delta);
+#endif
     }
     int err = mem_set_reservation_flags(mem, start, pages, flags);
     if (err < 0)
@@ -659,7 +686,7 @@ int pt_copy_on_write(struct mem *src, struct mem *dst, page_t start, page_t page
         dst_entry->offset = entry->offset;
         dst_entry->flags = entry->flags;
 #if ANON_MMAP_LIMIT_PAGES > 0
-        if (entry->flags & P_ANONYMOUS)
+        if (anon_page_is_charged(entry->flags))
             anon_copied++;
 #endif
     }
@@ -760,9 +787,6 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
             read_wrlock(&mem->lock);
             goto have_entry;
         }
-#if ANON_MMAP_LIMIT_PAGES > 0
-        atomic_fetch_add(&anon_page_count, 1);
-#endif
         if (pt_map_nothing(mem, page, 1, P_READ | P_WRITE | P_GROWSDOWN) >= 0)
             mem_changed(mem);
         write_wrunlock(&mem->lock);
@@ -786,9 +810,6 @@ check_reservation: ;
         }
         entry = mem_pt(mem, page);
         if (entry == NULL) {
-#if ANON_MMAP_LIMIT_PAGES > 0
-            atomic_fetch_add(&anon_page_count, 1);
-#endif
             if (pt_map_nothing(mem, page, 1, res->flags & ~P_GROWSDOWN) >= 0)
                 mem_changed(mem);
         }
@@ -804,7 +825,14 @@ have_entry:
             return NULL;
         if (type == MEM_WRITE_PTRACE) {
             // TODO: Is P_WRITE really correct? The page shouldn't be writable without ptrace.
+#if ANON_MMAP_LIMIT_PAGES > 0
+            bool was_charged = anon_page_is_charged(entry->flags);
+#endif
             entry->flags |= P_WRITE | P_COW;
+#if ANON_MMAP_LIMIT_PAGES > 0
+            if (!was_charged && anon_page_is_charged(entry->flags))
+                atomic_fetch_add(&anon_page_count, 1);
+#endif
         }
         // get rid of any compiled blocks in this page
         asbestos_invalidate_page(mem->mmu.asbestos, page);
@@ -821,12 +849,6 @@ have_entry:
             if (entry != NULL && (entry->flags & P_COW)) {
                 void *data = (char *) entry->data->data + entry->offset;
                 memcpy(copy, data, PAGE_SIZE);
-#if ANON_MMAP_LIMIT_PAGES > 0
-                // pt_map will unmap the old page (decrementing anon_page_count),
-                // so pre-increment for the new CoW copy to keep balance.
-                if (entry->flags & P_ANONYMOUS)
-                    atomic_fetch_add(&anon_page_count, 1);
-#endif
                 pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
                 mem_changed(mem);
             } else {

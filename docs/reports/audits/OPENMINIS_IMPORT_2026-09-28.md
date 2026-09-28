@@ -115,3 +115,30 @@ wraps only native-offload lookup/execution: it verifies a real filesystem
 shebang wrapper is not offloaded, an absent system-path builtin is, and a private
 path is not. Expanded release/debug gates pass. Linux's real registry remains
 stubbed; this is not Darwin registry, host-spawn, or iOS runtime validation.
+
+## Tranche 4: anonymous mapping ledger (`2d0094ad`, `a760a908`)
+
+The actual kernel reproduced **count -3** after mapping/unmapping three
+PROT_NONE pages (baseline assertion exit 134). Adapted the charge predicate and
+all-path accounting to our existing 48-bit/lazy mappings, without importing the
+footprint governor, device cap, host-page clusters or thread-local precharge.
+Our private map helper takes an explicit precharged flag; reservation uses CAS,
+transfers on success and rolls back on failure. Direct mappings, CoW and
+protection transitions share the same predicate. Host mprotect failure leaves
+old guest flags and charge intact. Existing cap value stays unchanged.
+
+The actual-archive fixture (not upstream's standalone arithmetic model) passes
+on release/debug: PROT_NONE teardown, internal maps, partial unmap, replacement,
+protection transitions, fork/CoW, lazy fault, 1TiB virtual reservation, in-place
+and moved mremap, cap rejection, and injected mmap/data-allocation/mprotect
+failures. Expanded upstream gate and the five preservation gates pass on both.
+This is a logical committed guest-page ledger, **not RSS/physical footprint**;
+protection reduction can leave resident host backing. mprotect/fork accounting
+is not a new hard cap policy, and fork can still take the ledger over its cap.
+
+Internal-continuation preservation: 14/14 release and 14/14 debug. Initially
+blocked by the absent Alpine lane, then the Debian lane's missing guest gcc;
+the runner now accepts explicit HOST_CC=clang to build the same static fixture
+on native AArch64 and stops immediately on setup failures. No skipped tests
+counted as passes. Reports: `ish-arm64-internal-continue-fixtures-20260928-124529.md`
+and `...-124530.md` in the evidence directory.

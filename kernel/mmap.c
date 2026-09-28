@@ -10,6 +10,19 @@
 
 #if ANON_MMAP_LIMIT_PAGES > 0
 _Atomic long anon_page_count;
+
+bool anon_pages_reserve(long pages) {
+    long count = atomic_load(&anon_page_count);
+    do {
+        if (pages > ANON_MMAP_LIMIT_PAGES || count > ANON_MMAP_LIMIT_PAGES - pages)
+            return false;
+    } while (!atomic_compare_exchange_weak(&anon_page_count, &count, count + pages));
+    return true;
+}
+
+void anon_pages_unreserve(long pages) {
+    atomic_fetch_sub(&anon_page_count, pages);
+}
 #endif
 
 struct mm *mm_new() {
@@ -125,19 +138,8 @@ static addr_t do_mmap(addr_t addr, uint64_t len, dword_t prot, dword_t flags, fd
             return page << PAGE_BITS;
         }
 #endif
-#if ANON_MMAP_LIMIT_PAGES > 0
-        if (!is_prot_none && atomic_load(&anon_page_count) + (long)pages > ANON_MMAP_LIMIT_PAGES)
-            return _ENOMEM;
-        if (!is_prot_none)
-            atomic_fetch_add(&anon_page_count, (long)pages);
-#endif
-        if ((err = pt_map_nothing(current->mem, page, pages, prot)) < 0) {
-#if ANON_MMAP_LIMIT_PAGES > 0
-            if (!is_prot_none)
-                atomic_fetch_sub(&anon_page_count, (long)pages);
-#endif
+        if ((err = pt_map_nothing(current->mem, page, pages, prot)) < 0)
             return err;
-        }
     } else {
         // fd must be valid
         struct fd *fd = f_get(fd_no);
@@ -269,22 +271,9 @@ addr_t sys_mremap(addr_t addr, dword_t old_len, dword_t new_len, dword_t flags) 
     pages_t extra_pages = new_pages - old_pages;
     bool is_prot_none = !(pt_flags & (P_READ | P_WRITE | P_EXEC));
     if (pt_is_hole(current->mem, extra_start, extra_pages)) {
-#if ANON_MMAP_LIMIT_PAGES > 0
-        if (!is_prot_none && atomic_load(&anon_page_count) + (long)extra_pages > ANON_MMAP_LIMIT_PAGES) {
-            result = _ENOMEM;
-            goto out;
-        }
-        if (!is_prot_none)
-            atomic_fetch_add(&anon_page_count, (long)extra_pages);
-#endif
         int err = pt_map_nothing(current->mem, extra_start, extra_pages, pt_flags);
-        if (err < 0) {
-#if ANON_MMAP_LIMIT_PAGES > 0
-            if (!is_prot_none)
-                atomic_fetch_sub(&anon_page_count, (long)extra_pages);
-#endif
+        if (err < 0)
             result = err;
-        }
         goto out;
     }
 
@@ -298,20 +287,8 @@ addr_t sys_mremap(addr_t addr, dword_t old_len, dword_t new_len, dword_t flags) 
         result = _ENOMEM;
         goto out;
     }
-#if ANON_MMAP_LIMIT_PAGES > 0
-    if (!is_prot_none && atomic_load(&anon_page_count) + (long)new_pages > ANON_MMAP_LIMIT_PAGES) {
-        result = _ENOMEM;
-        goto out;
-    }
-    if (!is_prot_none)
-        atomic_fetch_add(&anon_page_count, (long)new_pages);
-#endif
     int err = pt_map_nothing(current->mem, new_start, new_pages, pt_flags);
     if (err < 0) {
-#if ANON_MMAP_LIMIT_PAGES > 0
-        if (!is_prot_none)
-            atomic_fetch_sub(&anon_page_count, (long)new_pages);
-#endif
         result = err;
         goto out;
     }

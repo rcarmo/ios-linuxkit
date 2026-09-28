@@ -42,6 +42,10 @@ lifecycle_marker() {
     esac
 }
 "$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/anon-accounting.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 -Wl,--wrap=mprotect \
+    "${libs[@]}" -o "$TMP/anon-accounting"
+check "$TMP/anon-accounting.log" 'anon-accounting-actual-kernel-ok' "$TMP/anon-accounting"
+"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/offload-exec.c" -Wl,--wrap=native_offload_lookup_exec -Wl,--wrap=native_offload_exec \
     "${libs[@]}" -o "$TMP/offload-exec"
 mkdir -p "$TMP/offload-root/bin" "$TMP/offload-root/usr/bin" "$TMP/offload-root/tmp"

@@ -14,6 +14,12 @@
 
 #if ANON_MMAP_LIMIT_PAGES > 0
 extern _Atomic long anon_page_count;
+// Logical committed anonymous guest pages, not host RSS/physical footprint.
+bool anon_pages_reserve(long pages);
+void anon_pages_unreserve(long pages);
+static inline bool anon_page_is_charged(unsigned flags) {
+    return (flags & P_ANONYMOUS) && (flags & P_RWX);
+}
 #endif
 
 // uses mem.lock instead of having a lock of its own

@@ -525,9 +525,21 @@ main() {
     run_audit_test "source/iOS default-off audit" source_default_off_audit "ios-default-off-audit-ok"
 
     prepare_fixture
+    # Minimal rootfs lanes need no guest toolchain: compile the same fixture
+    # statically on a native AArch64 host when explicitly requested.
+    if [ -n "${HOST_CC:-}" ]; then
+        [ "$(uname -m)" = aarch64 ] || { echo 'HOST_CC requires native AArch64' >&2; exit 1; }
+        "$HOST_CC" -O0 -static -fno-pie -no-pie "$HOST_TMP/src/internal_continue_fixture.c" \
+            -o "$HOST_TMP/src/internal_continue_fixture" || exit 1
+    fi
     push_tree "$HOST_TMP/src" "$GUEST_WORK"
 
-    run_host_test "build fixture" "" "cd '$GUEST_WORK' && command -v gcc >/dev/null && gcc -O0 -fno-pie -no-pie internal_continue_fixture.c -o internal_continue_fixture && test -x internal_continue_fixture && echo build-ok" exact "build-ok"
+    if [ -n "${HOST_CC:-}" ]; then
+        run_host_test "host-built fixture available" "" "cd '$GUEST_WORK' && test -x internal_continue_fixture && echo build-ok" exact "build-ok"
+    else
+        run_host_test "build fixture" "" "cd '$GUEST_WORK' && command -v gcc >/dev/null && gcc -O0 -fno-pie -no-pie internal_continue_fixture.c -o internal_continue_fixture && test -x internal_continue_fixture && echo build-ok" exact "build-ok"
+    fi
+    [ "$FAIL_COUNT" -eq 0 ] || { write_report; return 1; }
     run_host_test "default branch fixture stays silent" "" "cd '$GUEST_WORK' && ./internal_continue_fixture branch" exact "branch-ok"
     run_host_test "stats-only default-off fixture" "ISH_ARM64_FUSION_STATS=1" "cd '$GUEST_WORK' && ./internal_continue_fixture branch" stats-zero "branch-ok"
     run_host_test "opt-in branch taken-internal fixture" "ISH_ARM64_FUSION_STATS=1 ISH_ARM64_INTERNAL_CONTINUE=1 ISH_ARM64_INTERNAL_CONTINUE_TAKEN=1" "cd '$GUEST_WORK' && ./internal_continue_fixture branch" stats-positive "branch-ok"
