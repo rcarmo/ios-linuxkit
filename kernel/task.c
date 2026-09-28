@@ -55,8 +55,18 @@ struct task *task_create_(struct task *parent) {
     list_init(&pid->pgroup);
 
     struct task *task = malloc(sizeof(struct task));
-    if (task == NULL)
+    if (task == NULL) {
+        // Release pids_lock before bailing out. Returning while still holding
+        // it wedged the whole kernel: every later task_create_, pid_get_task
+        // and signal delivery blocks on this lock forever, so an allocation
+        // failure turned into a total freeze instead of one failed fork.
+        // Also roll back the pid slot claimed above, which would otherwise be
+        // permanently reserved for a task that was never created.
+        pid->id = 0;
+        pid->task = NULL;
+        unlock(&pids_lock);
         return NULL;
+    }
     *task = (struct task) {};
     if (parent != NULL)
         *task = *parent;

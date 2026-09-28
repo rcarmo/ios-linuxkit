@@ -271,6 +271,7 @@ static struct fd *fakefs_open(struct mount *mount, const char *path, int flags, 
         if (flags & O_TRUNC_) real_flags |= O_TRUNC;
         if (flags & O_APPEND_) real_flags |= O_APPEND;
         if (flags & O_NONBLOCK_) real_flags |= O_NONBLOCK;
+        if (flags & O_NOFOLLOW_) real_flags |= O_NOFOLLOW;
         int fd_no = open(host_abs, real_flags, 0666);
         if (fd_no < 0) {
             return ERR_PTR(errno_map());
@@ -504,7 +505,12 @@ static int fakefs_stat(struct mount *mount, const char *path, struct statbuf *fa
             db_commit(fs);
             return errno_map();
         }
-        /* Copy basic fields from real stat */
+        /* Match fstat's host identity and block metadata (OpenMinis 359a268d).
+         * Guest ownership/mode/inode are overlaid from fakefs below. */
+        memset(fake_stat, 0, sizeof(*fake_stat));
+        fake_stat->dev = dev_fake_from_real(real_stat.st_dev);
+        fake_stat->blksize = real_stat.st_blksize;
+        fake_stat->blocks = real_stat.st_blocks;
         fake_stat->size = real_stat.st_size;
         fake_stat->nlink = real_stat.st_nlink;
         fake_stat->atime = platform_stat_atime_sec(&real_stat);

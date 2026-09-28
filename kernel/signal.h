@@ -64,6 +64,13 @@ struct sigaction_ {
 #define SI_TIMER_ -2
 #define SI_TKILL_ -6
 #define SI_KERNEL_ 128
+// si_code values for SIGCHLD (see waitid(2))
+#define CLD_EXITED_ 1
+#define CLD_KILLED_ 2
+#define CLD_DUMPED_ 3
+#define CLD_TRAPPED_ 4
+#define CLD_STOPPED_ 5
+#define CLD_CONTINUED_ 6
 #define TRAP_TRACE_ 2
 #define SEGV_MAPERR_ 1
 #define SEGV_ACCERR_ 2

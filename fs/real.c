@@ -37,6 +37,12 @@ static int open_flags_real_from_fake(int flags) {
     if (flags & O_TRUNC_) real_flags |= O_TRUNC;
     if (flags & O_APPEND_) real_flags |= O_APPEND;
     if (flags & O_NONBLOCK_) real_flags |= O_NONBLOCK;
+    if (flags & O_NOFOLLOW_) real_flags |= O_NOFOLLOW;
+    /* O_DIRECTORY is deliberately not forwarded: generic_openat() already
+     * enforces ENOTDIR against the guest's view of the type, and Darwin's
+     * open() has no O_DIRECTORY. O_PATH/O_DIRECT have no Darwin equivalent
+     * either (F_NOCACHE is the closest to O_DIRECT and is advisory), so they
+     * stay guest-side only. */
     return real_flags;
 }
 
@@ -50,6 +56,7 @@ static int open_flags_fake_from_real(int flags) {
     if (flags & O_TRUNC) fake_flags |= O_TRUNC_;
     if (flags & O_APPEND) fake_flags |= O_APPEND_;
     if (flags & O_NONBLOCK) fake_flags |= O_NONBLOCK_;
+    if (flags & O_NOFOLLOW) fake_flags |= O_NOFOLLOW_;
     return fake_flags;
 }
 

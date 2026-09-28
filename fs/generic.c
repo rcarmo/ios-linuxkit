@@ -37,7 +37,12 @@ struct fd *generic_openat(struct fd *at, const char *path_raw, int flags, int mo
 
     // TODO really, really, seriously reconsider what I'm doing with the strings
     char path[MAX_PATH];
-    int err = path_normalize(at, path_raw, path, N_SYMLINK_FOLLOW |
+    // O_NOFOLLOW has to be honored here rather than by handing the flag to the
+    // host open(): path_normalize resolves the final component itself, so by
+    // the time the fs open() runs the symlink is already gone. Leaving it
+    // unresolved makes the S_ISLNK check below return ELOOP, as Linux does.
+    int err = path_normalize(at, path_raw, path,
+            (flags & O_NOFOLLOW_ ? N_SYMLINK_NOFOLLOW : N_SYMLINK_FOLLOW) |
             (flags & O_CREAT_ ? N_PARENT_DIR_WRITE : 0));
     if (err < 0)
         return ERR_PTR(err);

@@ -55,7 +55,9 @@ static int __path_normalize(const char *at_path, const char *path, char *out, in
             }
         }
 
-        // output a slash
+        // Reserve the slash and terminating NUL (OpenMinis a4b5d7e3).
+        if (n <= 1)
+            return _ENAMETOOLONG;
         *o++ = '/'; n--;
         char *c = o;
         // copy up to a slash or null
@@ -65,7 +67,7 @@ static int __path_normalize(const char *at_path, const char *path, char *out, in
         while (*p == '/')
             p++;
 
-        if (n == 0)
+        if (n <= 0)
             return _ENAMETOOLONG;
 
         if ((flags & N_SYMLINK_FOLLOW) || *p != '\0') {

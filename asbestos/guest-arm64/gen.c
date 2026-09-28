@@ -6534,10 +6534,16 @@ skip_three_different:
     // Mask 0xff201fe0 checks fixed bits, ignores ftype, imm8, Rd
     if ((insn & 0xff201fe0) == 0x1e201000) {
         uint32_t ftype = (insn >> 22) & 3;
-        uint32_t imm8 = (insn >> 13) & 0xff;
+        uint32_t imm8_raw = (insn >> 13) & 0xff;
         uint32_t rd = insn & 0x1f;
         bool is_double = (ftype == 1);
 
+        // arm64_fpimm_to_bits() expects bit6 already inverted -- see the other
+        // caller in gen_simd_fp(). This path passed the raw imm8 instead, so
+        // every scalar FMOV #imm came out scaled by 8x (e.g. #0.71875 -> 11.5).
+        // V8's ieee754::cos loads its C1/C2 range-reduction constants this way,
+        // which is why cos(x) returned x+15 for |x| just under pi/4.
+        uint32_t imm8 = imm8_raw ^ 0x40;
         uint64_t fpbits = arm64_fpimm_to_bits(is_double, imm8);
 
         gen(state, (unsigned long) gadget_fmov_fp_imm);

@@ -375,7 +375,13 @@ int_t sys_timer_create(dword_t clock, addr_t sigevent_addr, addr_t timer_addr) {
     timer->tgroup = NULL;
     if (sigev.method == SIGEV_SIGNAL_) {
         timer->tgroup = group;
-        timer->thread_pid = 0;
+        // SIGEV_SIGNAL means "signal the process". posix_timer_callback
+        // resolves its target with pid_get_task(thread_pid), and pid 0 is
+        // never a live task, so leaving this at 0 made the lookup return
+        // NULL and the callback drop the signal -- the timer armed, the
+        // clock expired, and nothing was ever delivered. Target the group
+        // leader, which is what "the process" means here.
+        timer->thread_pid = group->leader->pid;
     } else if (sigev.method == SIGEV_THREAD_ID_) {
         timer->tgroup = group;
         timer->thread_pid = group->leader->pid;
