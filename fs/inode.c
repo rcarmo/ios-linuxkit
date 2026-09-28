@@ -29,6 +29,7 @@ struct inode_data *inode_get_unlocked(struct mount *mount, ino_t ino) {
         if (inode == NULL)
             return NULL;
         inode->refcount = 0;
+        inode->orphan_pending = false;
         inode->number = ino;
         mount_retain(mount);
         inode->mount = mount;
@@ -56,6 +57,8 @@ void inode_check_orphaned(struct mount *mount, ino_t ino) {
     struct inode_data *inode = inode_get_data(mount, ino);
     if (inode == NULL)
         mount->fs->inode_orphaned(mount, ino);
+    else
+        inode->orphan_pending = true;
     unlock(&inodes_lock);
 }
 
@@ -71,7 +74,7 @@ void inode_release(struct inode_data *inode) {
     if (--inode->refcount == 0) {
         unlock(&inode->lock);
         list_remove(&inode->chain);
-        if (inode->mount->fs->inode_orphaned)
+        if (inode->orphan_pending && inode->mount->fs->inode_orphaned)
             inode->mount->fs->inode_orphaned(inode->mount, inode->number);
         unlock(&inodes_lock);
         mount_release(inode->mount);

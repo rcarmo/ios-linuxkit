@@ -184,7 +184,12 @@ static int bootError;
     err = do_execve(command[0].UTF8String, command.count, argv, envp);
     if (err < 0)
         return err;
-    task_start(current);
+    err = task_start(current);
+    if (err < 0) {
+        task_discard_unstarted(current);
+        current = NULL;
+        return err;
+    }
 
 #else
     // On first launch, this will trigger the import of the default root. Make sure to do this before entering the kernel, because it needs to run something on the main thread, and that would deadlock.

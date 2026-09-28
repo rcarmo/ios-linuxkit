@@ -239,7 +239,9 @@ static int proc_pid_maps_show(struct proc_entry *entry, struct proc_data *buf) {
     struct task *task = proc_get_task(entry);
     if (task == NULL)
         return _ESRCH;
+    lock(&task->general_lock);
     proc_maps_dump(task, buf);
+    unlock(&task->general_lock);
     proc_put_task(task);
     return 0;
 }
@@ -248,7 +250,10 @@ static ssize_t proc_pid_mem_pread(struct proc_entry *entry, struct proc_data *bu
     struct task *task = proc_get_task(entry);
     if (task == NULL)
         return _ESRCH;
-    int result = user_read_task(task, (addr_t)offset, buf->data, buf->size);
+    lock(&task->general_lock);
+    int result = task->mem == NULL ? -1 :
+        user_read_task(task, (addr_t)offset, buf->data, buf->size);
+    unlock(&task->general_lock);
     proc_put_task(task);
     return result ? -1 : buf->size;
 }
@@ -257,7 +262,10 @@ static ssize_t proc_pid_mem_pwrite(struct proc_entry *entry, struct proc_data *b
     struct task *task = proc_get_task(entry);
     if (task == NULL)
         return _ESRCH;
-    int result = user_write_task_ptrace(task, (addr_t)offset, buf->data, buf->size);
+    lock(&task->general_lock);
+    int result = task->mem == NULL ? -1 :
+        user_write_task_ptrace(task, (addr_t)offset, buf->data, buf->size);
+    unlock(&task->general_lock);
     proc_put_task(task);
     return result ? -1 : buf->size;
 }

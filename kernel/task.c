@@ -8,6 +8,7 @@
 #include "kernel/memory.h"
 #include "emu/tlb.h"
 #include "platform/platform.h"
+#include "fs/fd.h"
 
 __thread struct task *current;
 
@@ -240,9 +241,56 @@ __attribute__((constructor)) static void create_attr() {
     pthread_attr_setdetachstate(&task_thread_attr, PTHREAD_CREATE_DETACHED);
 }
 
-void task_start(struct task *task) {
-    if (pthread_create(&task->thread, &task_thread_attr, task_thread, task) < 0)
-        die("could not create thread");
+// Dispose of a fully initialised task for which task_start failed. Unlike
+// task_destroy (the final PID/struct teardown), this drops all owned resources.
+// The task has never run, so there are no children or per-thread futex pipes.
+void task_discard_unstarted(struct task *task) {
+    lock(&pids_lock);
+    lock(&task->general_lock);
+    struct mm *mm = task->mm;
+    struct fdtable *files = task->files;
+    struct fs_info *fs = task->fs;
+    task->mm = NULL;
+    task->mem = NULL;
+    task->files = NULL;
+    task->fs = NULL;
+    unlock(&task->general_lock);
+    unlock(&pids_lock);
+    // Resource destructors may take other locks and need a live current/group.
+    mm_release(mm);
+    fdtable_release(files);
+    fs_info_release(fs);
+    lock(&pids_lock);
+    sighand_release(task->sighand);
+    struct sigqueue *entry, *tmp;
+    list_for_each_entry_safe(&task->queue, entry, tmp, queue) {
+        list_remove(&entry->queue);
+        free(entry);
+    }
+    struct tgroup *group = task->group;
+    list_remove(&task->group_links);
+    if (list_empty(&group->threads)) {
+        task_leave_session(task);
+        list_remove(&group->pgroup);
+        cond_destroy(&group->child_exit);
+        cond_destroy(&group->stopped_cond);
+        pthread_mutex_destroy(&group->lock.m);
+        free(group);
+    }
+    cond_destroy(&task->pause);
+    cond_destroy(&task->ptrace.cond);
+    pthread_mutex_destroy(&task->ptrace.lock.m);
+    pthread_mutex_destroy(&task->waiting_cond_lock.m);
+    pthread_mutex_destroy(&task->general_lock.m);
+    task_destroy(task);
+    unlock(&pids_lock);
+}
+
+int task_start(struct task *task) {
+    int err = pthread_create(&task->thread, &task_thread_attr, task_thread, task);
+    if (err != 0)
+        return err == EAGAIN ? _EAGAIN : _ENOMEM;
+    return 0;
 }
 
 int_t sys_sched_yield() {

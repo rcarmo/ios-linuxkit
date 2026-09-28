@@ -231,6 +231,11 @@ void handle_interrupt(int interrupt) {
         // loop where receive_signals() handles SIGKILL. Catch it here.
         if (current->group->doing_group_exit)
             do_exit(current->group->group_exit_code);
+    } else if (interrupt == INT_OOM) {
+        // Do not disguise host allocation failure as a guest page fault: a
+        // mapped code page would otherwise be retried forever. Kill only the
+        // affected guest process group, as for a host OOM victim.
+        do_exit_group(SIGKILL_);
     } else if (interrupt == INT_GPF) {
         read_wrlock(&current->mem->lock);
         void *ptr = mem_ptr(current->mem, cpu->segfault_addr, cpu->segfault_was_write ? MEM_WRITE : MEM_READ);

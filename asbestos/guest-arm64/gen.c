@@ -972,15 +972,19 @@ extern void gadget_fused_subs_reg_bcond_gt(void);
 extern void gadget_fused_subs_reg_bcond_le(void);
 
 static void gen(struct gen_state *state, unsigned long thing) {
+    if (state->oom)
+        return;
     assert(state->size <= state->capacity);
     if (state->size >= state->capacity) {
-        state->capacity *= 2;
+        unsigned capacity = state->capacity * 2;
         struct fiber_block *new_block = realloc(state->block,
-                sizeof(*new_block) + state->capacity * sizeof(unsigned long));
+                sizeof(*new_block) + capacity * sizeof(unsigned long));
         if (new_block == NULL) {
-            abort();
+            state->oom = true;
+            return;
         }
         state->block = new_block;
+        state->capacity = capacity;
     }
     state->block->code[state->size++] = thing;
 }
@@ -1034,10 +1038,13 @@ void gen_start(addr_t addr, struct gen_state *state) {
 
     struct fiber_block *block = malloc(sizeof(struct fiber_block) + state->capacity * sizeof(unsigned long));
     state->block = block;
-    block->addr = addr;
+    state->oom = block == NULL;
+    if (block != NULL)
+        block->addr = addr;
 }
 
 void gen_end(struct gen_state *state) {
+    assert(!state->oom);
     struct fiber_block *block = state->block;
     for (int i = 0; i <= 1; i++) {
         if (state->jump_ip[i] != 0) {

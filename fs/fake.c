@@ -284,7 +284,11 @@ static struct fd *fakefs_open(struct mount *mount, const char *path, int flags, 
         if (IS_ERR(fd))
             return fd;
     }
-    db_begin_write(fs);
+    // Plain opens only read metadata; avoid acquiring SQLite's writer lock.
+    if (flags & O_CREAT_)
+        db_begin_write(fs);
+    else
+        db_begin_read(fs);
     fd->fake_inode = path_get_inode(fs, path);
     if (flags & O_CREAT_) {
         struct ish_stat ishstat;
@@ -307,6 +311,13 @@ static struct fd *fakefs_open(struct mount *mount, const char *path, int flags, 
             fd_close(fd);
             return ERR_PTR(_ENOENT);
         }
+    }
+    // Retain the inode before generic_openat's fstat, keeping its expensive
+    // metadata read outside the global inode lock (OpenMinis a1e8b1e2).
+    fd->inode = inode_get(mount, fd->fake_inode);
+    if (fd->inode == NULL) {
+        fd_close(fd);
+        return ERR_PTR(_ENOMEM);
     }
     fd->ops = &fakefs_fdops;
     return fd;
@@ -395,6 +406,7 @@ static int fakefs_rename(struct mount *mount, const char *src, const char *dst) 
     if (is_under_readonly_bind_mount(src) || is_under_readonly_bind_mount(dst))
         return _EROFS;
     db_begin_write(fs);
+    ino_t replaced = path_get_inode(fs, dst);
     path_rename(fs, src, dst);
     int err = realfs.rename(mount, src, dst);
     if (err < 0) {
@@ -402,6 +414,8 @@ static int fakefs_rename(struct mount *mount, const char *src, const char *dst) 
         return err;
     }
     db_commit(fs);
+    if (replaced != 0)
+        inode_check_orphaned(mount, replaced);
     return 0;
 }
 

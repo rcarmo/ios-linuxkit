@@ -9,6 +9,7 @@ struct fd;
 
 struct inode_data {
     unsigned refcount;
+    bool orphan_pending; // protected by inodes_lock, set on namespace removal
     ino_t number;
     struct mount *mount;
     struct list chain;

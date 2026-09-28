@@ -14,3 +14,4 @@
 #define INT_TIMER 32
 #define INT_SYSCALL 0x80
 #define INT_JIT_CRASH 0x100  // JIT SIGSEGV recovery (stale TLB after CoW)
+#define INT_OOM 0x101        // host translated-data allocation failure, not guest GPF

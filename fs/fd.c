@@ -144,7 +144,7 @@ static int fdtable_expand(struct fdtable *table, fd_t max) {
 }
 
 struct fd *fdtable_get(struct fdtable *table, fd_t f) {
-    if (f < 0 || (unsigned) f >= current->files->size)
+    if (f < 0 || (unsigned) f >= table->size)
         return NULL;
     return table->files[f];
 }

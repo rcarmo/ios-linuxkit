@@ -85,14 +85,17 @@ noreturn void do_exit(int status) {
             futex_wake(clear_tid, 1);
     }
 
-    // release all our resources (may already be NULL if force-released by do_exit_group)
-    if (current->mm != NULL) {
-        mm_release(current->mm);
-        current->mm = NULL;
-        // [T-ish-mm-leak-refcount-handoff] We just released it, so the pthread
-        // cleanup handler must NOT release again.
-        current->mm_release_deferred = false;
-    }
+    // Unpublish under the same lock used by procfs before destroying mm
+    // (OpenMinis 80e444f1). Keep release outside general_lock: memory teardown
+    // may take other locks. Preserve our cleanup-handler ownership handoff.
+    lock(&current->general_lock);
+    struct mm *exiting_mm = current->mm;
+    current->mm = NULL;
+    current->mem = NULL;
+    current->mm_release_deferred = false;
+    unlock(&current->general_lock);
+    if (exiting_mm != NULL)
+        mm_release(exiting_mm);
     if (current->files != NULL) {
         fdtable_release(current->files);
         current->files = NULL;

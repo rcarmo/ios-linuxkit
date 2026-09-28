@@ -6,8 +6,9 @@ CC="${CC:-clang}"
 ISH_BIN="${ISH_BIN:-$PROJECT/build-arm64-linux/ish}"
 ROOTFS="${ROOTFS:-$PROJECT/debian-arm64-fakefs}"
 TIMEOUT_S="${TIMEOUT_S:-120}"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+TMP="${EVIDENCE_DIR:-$(mktemp -d)}"
+mkdir -p "$TMP"
+if [ -z "${EVIDENCE_DIR:-}" ]; then trap 'rm -rf "$TMP"' EXIT; fi
 test "$(uname -m)" = aarch64 || { echo 'native AArch64 oracle required' >&2; exit 1; }
 test -x "$ISH_BIN"; test -d "$ROOTFS"
 "$CC" -O0 -static -Wall -Wextra "$HERE/fmov-imm.c" "$HERE/fmov-imm.S" -o "$TMP/fmov-imm"
@@ -19,6 +20,33 @@ check() {
     if grep -Eq 'SKIP|SAFETY-VALVE|FAIL  |FAILURES: [1-9]' "$log"; then cat "$log"; return 1; fi
     grep -Fq "$marker" "$log" || { cat "$log"; return 1; }
 }
+"$CC" -O2 -static -pthread "$HERE/lifecycle.c" -o "$TMP/lifecycle"
+"$CC" -O2 -static -pthread "$HERE/subms.c" -o "$TMP/subms"
+"$CC" -O2 -static "$HERE/open-unlink.c" -o "$TMP/open-unlink"
+# Host-linked injection uses the actual candidate archives, not mock kernels.
+BUILD_DIR=$(dirname "$ISH_BIN")
+libs=(-Wl,--start-group "$BUILD_DIR/libish.a" "$BUILD_DIR/libish_emu.a" "$BUILD_DIR/libfakefs.a" -Wl,--end-group -lrt -lm -ldl -lsqlite3)
+"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/task-start.c" -Wl,--wrap=pthread_create "${libs[@]}" -o "$TMP/task-start"
+"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/jit-oom.c" -Wl,--wrap=calloc -Wl,--wrap=malloc -Wl,--wrap=do_exit_group "${libs[@]}" -o "$TMP/jit-oom"
+"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" \
+    -ffunction-sections -fdata-sections "$HERE/gen-oom.c" -Wl,--gc-sections -o "$TMP/gen-oom"
+lifecycle_marker() {
+    case "$1" in
+        sleep) echo sleep-deadline-signal-ok;;
+        proc) echo proc-exit-bounded-ok;;
+        orphan) echo orphan-last-close-ok;;
+    esac
+}
+check "$TMP/task-start.log" 'task-start-rollback-ok' "$TMP/task-start"
+check "$TMP/jit-oom.log" 'jit-oom-guest-kill-dispatch-ok' "$TMP/jit-oom"
+check "$TMP/gen-oom.log" 'gen-oom-actual-emitter-ok' "$TMP/gen-oom"
+check "$TMP/native-subms.log" ', 0 failed' "$TMP/subms"
+check "$TMP/native-open-unlink.log" '8/8 workers clean' "$TMP/open-unlink"
+for mode in sleep proc orphan; do
+    check "$TMP/native-lifecycle-$mode.log" "$(lifecycle_marker "$mode")" "$TMP/lifecycle" "$mode"
+done
 check "$TMP/native-fmov.log" 'FAILURES: 0' "$TMP/fmov-imm"
 # The UID-change assertion requires privilege; never silently count its skip.
 if [ "$(id -u)" = 0 ]; then
@@ -27,10 +55,15 @@ else
     check "$TMP/native-matrix.log" 'PASS: 52    FAIL: 0' sudo -n "$TMP/syscall-matrix"
 fi
 for mode in timer flags signal; do check "$TMP/native-$mode.log" '' "$TMP/syscall-probes" "$mode"; done
-tar -C "$TMP" -cf - fmov-imm syscall-matrix syscall-probes |
+tar -C "$TMP" -cf - fmov-imm syscall-matrix syscall-probes lifecycle subms open-unlink |
     timeout "$TIMEOUT_S" "$ISH_BIN" -f "$ROOTFS" /bin/sh -c \
         'mkdir -p /tmp/upstream-regress && tar -xf - -C /tmp/upstream-regress'
 check "$TMP/guest-fmov.log" 'FAILURES: 0' "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-regress/fmov-imm
 check "$TMP/guest-matrix.log" 'PASS: 52    FAIL: 0' "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-regress/syscall-matrix
 for mode in timer flags signal; do check "$TMP/guest-$mode.log" '' "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-regress/syscall-probes "$mode"; done
-echo 'upstream-correctness-gate-ok: FMOV 512 values; syscall matrix 52; timer/flags/signal probes'
+check "$TMP/guest-open-unlink.log" '8/8 workers clean' "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-regress/open-unlink
+check "$TMP/guest-subms.log" ', 0 failed' "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-regress/subms
+for mode in sleep proc orphan; do
+    check "$TMP/guest-lifecycle-$mode.log" "$(lifecycle_marker "$mode")" "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-regress/lifecycle "$mode"
+done
+echo 'upstream-correctness-gate-ok: FMOV512; syscall52; timer/flags/signal; sleep/proc/orphan; subms; JIT OOM; failed-start rollback'

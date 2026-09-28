@@ -186,13 +186,23 @@
 
     char argv[4096];
     [Terminal convertCommand:command toArgs:argv limitSize:sizeof(argv)];
-    const char *envp = "TERM=xterm-256color\0";
+    const char *envp = "TERM=xterm-256color\0"
+#if defined(GUEST_ARM64)
+        "PYTHONMALLOC=malloc\0"
+#endif
+        ;
     err = do_execve(command[0].UTF8String, command.count, argv, envp);
     if (err < 0)
         return err;
     self.sessionPid = current->pid;
     NSLog(@"started terminal session pid %d on %@", self.sessionPid, stdioFile);
-    task_start(current);
+    err = task_start(current);
+    if (err < 0) {
+        task_discard_unstarted(current);
+        current = NULL;
+        self.sessionPid = 0;
+        return err;
+    }
 #else
     const char *argv_arr[command.count + 1];
     for (NSUInteger i = 0; i < command.count; i++)

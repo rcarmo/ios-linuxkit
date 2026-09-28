@@ -243,7 +243,10 @@ struct task *pid_get_task_zombie(dword_t id); // don't return null if the task e
 #define MAX_PID (1 << 15) // oughta be enough
 
 // TODO document
-void task_start(struct task *task);
+// pthread_create returns positive error codes; every caller must handle failure.
+int task_start(struct task *task) __attribute__((warn_unused_result));
+// Only for fully initialised tasks whose host thread never started; no locks held.
+void task_discard_unstarted(struct task *task);
 void task_run_current(void);
 
 extern void (*exit_hook)(struct task *task, int code);

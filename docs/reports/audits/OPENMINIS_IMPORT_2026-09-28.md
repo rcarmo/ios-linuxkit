@@ -54,3 +54,49 @@ Further lifecycle, OOM, sleep, accounting and filesystem improvements remain
 under review. Memory/fork governor policy and Apple 16 KiB clustering need
 separate assessment; Linux evidence cannot establish iOS footprint behaviour.
 No macOS build, signing, archive or device validation is claimed.
+
+## Tranche 2: lifetime, timing and allocation safety
+
+| Upstream commit | Adaptation |
+|---|---|
+| `80e444f1` | Unpublish mm/mem under general_lock, release outside it; proc maps/mem use the same lock. Preserve deferred-mm cleanup ownership. |
+| `3bb6e27e`, `b311a744`, `a6c35797` | Interruptible deadline-loop sleeps with EINTR remainder; validate duration; destroy private mutex; honour every positive sleep (do not adopt upstream ≤50us yielding). Futex retains positive sub-ms remainder. |
+| `84770265` | Deallocate the thread_info Mach send right in our platform/darwin.c rather than importing upstream's resource.c layout. |
+| `f08572a0` | Fail gadget allocation without abort/finalising partial blocks. Distinct INT_OOM kills the affected guest thread group instead of retrying a mapped-page GPF. Release JIT locks on failure. |
+| `f08572a0` (task subset) | Check positive pthread_create errors, propagate to clone/app, and explicitly unwind owned task resources. Local rollback also fixes fdtable_get using current's table rather than its argument. |
+| `261bcd4e`, `a1e8b1e2` | Defer orphan cleanup only after namespace removal; retain inode during open; fstat outside global inode lock; handle rename replacement. |
+| `3fa66c02` (transaction subset only) | Read transaction for noncreating opens. Do not cache exec stat snapshots or change creating-open transactions. |
+| Local portability follow-up | Terminal and upgrade launch environments get the boot path's ARM64 PYTHONMALLOC setting. |
+
+### Validation
+
+- `CC=clang make build-arm64-linux-all` passes. Expanded
+  `make test-arm64-upstream` passes against release and debug, including native
+  oracles. Actual-archive injection tests cover **300 failed clones** (fork,
+  vfork, shared-resource threads) and **100 failed app-task starts** per build,
+  with resource-refcount/PID/list checks. Initial fixture setup errors (missing
+  root mount/executable) were corrected before recording passes.
+- Actual emitter injection covers initial allocation and growth failures, retained
+  buffer/content and successful growth. Actual JIT entry injection checks frame
+  and block OOM, both JIT locks released, and SIGKILL dispatch (termination itself
+  is intercepted in the test). This caught a missing jetsam-lock release in the
+  candidate and is now a regression gate. Not an all-host-allocations OOM claim.
+- Bounded proc/exit: 30 rounds per run; open/unlink/rename-last-close: 50 rounds;
+  concurrent open/unlink: **8/8 workers clean** native/release/debug.
+- Precise 500us and 1.5ms futex waits and 200us nanosleeps pass native/release/debug;
+  recorded candidate shortest 500us waits 519us/537us. Invalid, interrupted and
+  blocked-signal nanosleeps pass. Extreme clock/range transitions remain outside
+  these fixtures.
+- Existing lseek-width, poke-stress, fcvt-vector, proc-mem-seek and
+  load64-fault-PC gates pass on both builds. Load-PC coverage retains its isolated
+  two-page-unmapped scope; no new PROT_NONE or second-page-only claim.
+- Ten alternating baseline/candidate pairs pinned to CPU11, 10,000
+  open/fstat/close operations each, same fakefs: baseline median **0.371973s**,
+  candidate **0.320039s** (13.96% lower), candidate faster in **10/10** pairs.
+  Baseline is saved v2.1.3; this is combined-tranche evidence, not per-patch
+  attribution, and frequency was not fixed. Raw `fsbench-pairs.txt` and fixture
+  are in the evidence directory. No general shell or iOS speedup claimed.
+- The long upstream procfs shell stress previously timed out (124), never
+  printed PROC_RACE_OK, and remains unresolved; bounded passes do not replace it.
+- ASan link unavailable (missing Clang 19 AArch64 runtime libraries). Darwin/app
+  changes are source-reviewed only; no Xcode, signing or device test here.

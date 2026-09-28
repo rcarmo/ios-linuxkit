@@ -807,7 +807,7 @@ static struct fiber_block *fiber_block_compile(addr_t ip, struct tlb *tlb) {
     struct gen_state state;
     TRACE("%d %08x --- compiling:\n", current_pid(), ip);
     gen_start(ip, &state);
-    while (true) {
+    while (!state.oom) {
         if (!gen_step(&state, tlb))
             break;
         // no block should span more than 2 pages
@@ -825,6 +825,10 @@ static struct fiber_block *fiber_block_compile(addr_t ip, struct tlb *tlb) {
             gen_exit(&state);
             break;
         }
+    }
+    if (state.oom) {
+        free(state.block);
+        return NULL;
     }
     gen_end(&state);
     assert(state.ip - ip <= PAGE_SIZE);
@@ -918,6 +922,10 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
     struct fiber_frame *frame = tlb->frame;
     if (frame == NULL) {
         frame = calloc(1, sizeof(struct fiber_frame));
+        if (frame == NULL) {
+            read_wrunlock(&asbestos->jetsam_lock);
+            return INT_OOM;
+        }
         tlb->frame = frame;
     } else if (caches_stale) {
         // ret_cache holds pointers into block->code; must clear on invalidation
@@ -967,6 +975,11 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
             block = fiber_lookup(asbestos, ip);
             if (block == NULL) {
                 block = fiber_block_compile(ip, tlb);
+                if (block == NULL) {
+                    unlock(&asbestos->lock);
+                    interrupt = INT_OOM;
+                    break;
+                }
                 fiber_insert(asbestos, block);
             } else {
                 TRACE("%d %08x --- missed cache\n", current_pid(), ip);
@@ -1112,8 +1125,14 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
 static int cpu_single_step(struct cpu_state *cpu, struct tlb *tlb) {
     struct gen_state state;
     gen_start(CPU_IP(cpu), &state);
-    gen_step(&state, tlb);
-    gen_exit(&state);
+    if (!state.oom) {
+        gen_step(&state, tlb);
+        gen_exit(&state);
+    }
+    if (state.oom) {
+        free(state.block);
+        return INT_OOM;
+    }
     gen_end(&state);
 
     struct fiber_block *block = state.block;

@@ -100,11 +100,22 @@
     err = create_stdio(stdioFile.fileSystemRepresentation, TTY_PSEUDO_SLAVE_MAJOR, self.tty->num);
     if (err < 0)
         return err;
-    err = do_execve("/sbin/apk", 2, "/sbin/apk\0upgrade\0", "TERM=xterm-256color\0");
+    const char *envp = "TERM=xterm-256color\0"
+#if defined(GUEST_ARM64)
+        "PYTHONMALLOC=malloc\0"
+#endif
+        ;
+    err = do_execve("/sbin/apk", 2, "/sbin/apk\0upgrade\0", envp);
     if (err < 0)
         return err;
     self.upgradePid = current->pid;
-    task_start(current);
+    err = task_start(current);
+    if (err < 0) {
+        task_discard_unstarted(current);
+        current = NULL;
+        self.upgradePid = 0;
+        return err;
+    }
     current = NULL;
     return 0;
 #else

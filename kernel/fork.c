@@ -211,7 +211,17 @@ dword_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t c
         send_signal(current, SIGTRAP_, SIGINFO_NIL);
     }
 
-    task_start(task);
+    int start_err = task_start(task);
+    if (start_err < 0) {
+        if (flags & CLONE_VFORK_) {
+            task->vfork = NULL;
+            cond_destroy(&vfork.cond);
+        }
+        task_discard_unstarted(task);
+        if (flags & CLONE_VFORK_)
+            pthread_mutex_destroy(&vfork.lock.m);
+        return start_err;
+    }
 
     if (flags & CLONE_VFORK_) {
         lock(&vfork.lock);

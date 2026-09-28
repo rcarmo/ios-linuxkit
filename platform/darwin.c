@@ -114,7 +114,10 @@ struct platform_sysinfo platform_get_sysinfo(void) {
 struct platform_thread_cpu_usage platform_get_thread_cpu_usage(void) {
     thread_basic_info_data_t info = {};
     mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
-    kern_return_t status = thread_info(mach_thread_self(), THREAD_BASIC_INFO, (thread_info_t)&info, &count);
+    // mach_thread_self returns a send right owned by this caller (84770265).
+    mach_port_t thread = mach_thread_self();
+    kern_return_t status = thread_info(thread, THREAD_BASIC_INFO, (thread_info_t)&info, &count);
+    mach_port_deallocate(mach_task_self(), thread);
     assert(status == KERN_SUCCESS);
     return (struct platform_thread_cpu_usage) {
         .user_sec = info.user_time.seconds,

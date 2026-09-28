@@ -16,6 +16,7 @@ struct gen_state {
     struct fiber_block *block;
     unsigned size;
     unsigned capacity;
+    bool oom; // Discard partial blocks after allocation failure; never finalise.
     unsigned jump_ip[2];
     unsigned block_patch_ip; // for call/call_indir gadgets
     // Dormant true-superblock scaffold: internal continue operands store code
