@@ -71,6 +71,11 @@ int native_offload_add(const char *spec);
 // Returns native host path, "[builtin]" for handler-only, or NULL.
 const char *native_offload_lookup(const char *guest_path);
 
+// Exec-aware lookup: restrict ffmpeg/ffprobe to exact system bin paths and
+// honour packed-env opt-outs. Exec separately rejects generic shebang scripts.
+const char *native_offload_lookup_exec(const char *guest_path, const char *envp,
+                                       bool *generic_out);
+
 // Execute the offloaded binary (handler or posix_spawn).
 // Takes over the current guest task and calls do_exit(). Does not return
 // on success. Returns negative errno on failure.

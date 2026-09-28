@@ -94,6 +94,13 @@ Validate both paths before accepting them from an external caller. A bind mount 
 native_offload_add_handler("ffmpeg", fake_ffmpeg_main);
 ```
 
+Generic `ffmpeg`/`ffprobe` handlers only claim exact `/bin`, `/usr/bin` or
+`/usr/local/bin` paths. Relative paths and private binaries fall through to
+emulated exec; readable shebang wrappers are not replaced. Set `NO_OFFLOAD=1`
+(or upstream-compatible `MINIS_NO_FFMPEG_OFFLOAD=1`) in the guest environment to
+disable these generic offloads. Synthetic Apple-only commands are unaffected.
+This is an exec-selection safeguard, not a sandbox or a canonical-path guarantee.
+
 The FFmpeg scheme uses this path for its test handler. Darwin builds can also map a guest command to a host executable through the `-n NAME=PATH` command-line form used by the shared launcher code. Native handlers execute with the app's host privileges and must not treat guest arguments or paths as trusted.
 
 ## Fastlane status

@@ -100,3 +100,18 @@ No macOS build, signing, archive or device validation is claimed.
   printed PROC_RACE_OK, and remains unresolved; bounded passes do not replace it.
 - ASan link unavailable (missing Clang 19 AArch64 runtime libraries). Darwin/app
   changes are source-reviewed only; no Xcode, signing or device test here.
+
+## Tranche 3: native-offload selection (`72dd6aaa`)
+
+Adapted the exact-system-path and packed-environment policy as a header-only
+implementation shared by Meson/Xcode. Generic ffmpeg/ffprobe offloads no longer
+hijack relative/private paths, respect NO_OFFLOAD=1 and the upstream spelling,
+and skip readable shebang wrappers. Synthetic Apple-only commands are unchanged.
+The local shebang probe is nonblocking and limited to regular files, avoiding a
+host stall when a selected path is a FIFO. Preserve argv/env cleanup handlers.
+
+All **39** upstream policy assertions pass. A new actual-kernel sys_execve test
+wraps only native-offload lookup/execution: it verifies a real filesystem
+shebang wrapper is not offloaded, an absent system-path builtin is, and a private
+path is not. Expanded release/debug gates pass. Linux's real registry remains
+stubbed; this is not Darwin registry, host-spawn, or iOS runtime validation.

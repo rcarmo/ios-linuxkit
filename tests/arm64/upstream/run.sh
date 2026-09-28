@@ -23,6 +23,8 @@ check() {
 "$CC" -O2 -static -pthread "$HERE/lifecycle.c" -o "$TMP/lifecycle"
 "$CC" -O2 -static -pthread "$HERE/subms.c" -o "$TMP/subms"
 "$CC" -O2 -static "$HERE/open-unlink.c" -o "$TMP/open-unlink"
+"$CC" -O2 -Wall -Wextra -Werror -I"$PROJECT" "$HERE/offload-policy.c" -o "$TMP/offload-policy"
+check "$TMP/offload-policy.log" 'ALL PASSED' "$TMP/offload-policy"
 # Host-linked injection uses the actual candidate archives, not mock kernels.
 BUILD_DIR=$(dirname "$ISH_BIN")
 libs=(-Wl,--start-group "$BUILD_DIR/libish.a" "$BUILD_DIR/libish_emu.a" "$BUILD_DIR/libfakefs.a" -Wl,--end-group -lrt -lm -ldl -lsqlite3)
@@ -39,6 +41,13 @@ lifecycle_marker() {
         orphan) echo orphan-last-close-ok;;
     esac
 }
+"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/offload-exec.c" -Wl,--wrap=native_offload_lookup_exec -Wl,--wrap=native_offload_exec \
+    "${libs[@]}" -o "$TMP/offload-exec"
+mkdir -p "$TMP/offload-root/bin" "$TMP/offload-root/usr/bin" "$TMP/offload-root/tmp"
+printf '#!/missing-interpreter\n' > "$TMP/offload-root/bin/ffmpeg"
+chmod 755 "$TMP/offload-root/bin/ffmpeg"
+check "$TMP/offload-exec.log" 'offload-exec-shebang-ok' "$TMP/offload-exec" "$TMP/offload-root"
 check "$TMP/task-start.log" 'task-start-rollback-ok' "$TMP/task-start"
 check "$TMP/jit-oom.log" 'jit-oom-guest-kill-dispatch-ok' "$TMP/jit-oom"
 check "$TMP/gen-oom.log" 'gen-oom-actual-emitter-ok' "$TMP/gen-oom"

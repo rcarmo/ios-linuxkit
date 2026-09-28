@@ -915,7 +915,22 @@ node_arg_injection_done: ;
     }
 
     // Native offload: check if this binary should run natively on the host
-    const char *native_path = native_offload_lookup(filename);
+    bool offload_is_generic = false;
+    const char *native_path = native_offload_lookup_exec(filename, envp, &offload_is_generic);
+    if (native_path && offload_is_generic) {
+        // A system-path shell wrapper is still the user's program. Missing
+        // files may offload: the app's built-in command need not exist on disk.
+        struct fd *probe = generic_open(filename, O_RDONLY_ | O_NONBLOCK_, 0);
+        if (!IS_ERR(probe)) {
+            struct statbuf stat;
+            char magic[2];
+            if (probe->mount->fs->fstat(probe, &stat) == 0 && S_ISREG(stat.mode) &&
+                    probe->ops->read && probe->ops->read(probe, magic, sizeof(magic)) == 2 &&
+                    magic[0] == '#' && magic[1] == '!')
+                native_path = NULL;
+            fd_close(probe);
+        }
+    }
     if (native_path) {
         // native_offload_exec calls do_exit() on success, which unwinds via
         // pthread_exit() and skips the err_free_{argv,envp} labels below.

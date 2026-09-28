@@ -31,6 +31,7 @@
 #include "kernel/calls.h"
 #include "kernel/task.h"
 #include "kernel/native_offload.h"
+#include "kernel/native_offload_policy.h"
 #include "kernel/fs.h"
 #include "fs/fd.h"
 #include "fs/fake-db.h"
@@ -44,7 +45,14 @@
 
 #if !__APPLE__
 int native_offload_add(const char *spec) { (void)spec; return -1; }
-const char *native_offload_lookup(const char *guest_path) { (void)guest_path; return NULL; }
+const char *native_offload_lookup_exec(const char *guest_path, const char *envp, bool *generic_out) {
+    (void)guest_path; (void)envp;
+    if (generic_out) *generic_out = false;
+    return NULL;
+}
+const char *native_offload_lookup(const char *guest_path) {
+    return native_offload_lookup_exec(guest_path, NULL, NULL);
+}
 int native_offload_exec(const char *native_path, const char *guest_file,
                         size_t argc, const char *argv, const char *envp) {
     (void)native_path; (void)guest_file; (void)argc; (void)argv; (void)envp;
@@ -171,12 +179,21 @@ static struct offload_entry *offload_find(const char *guest_path) {
     return NULL;
 }
 
-const char *native_offload_lookup(const char *guest_path) {
+const char *native_offload_lookup_exec(const char *guest_path, const char *envp, bool *generic_out) {
+    if (generic_out) *generic_out = false;
+    if (guest_path == NULL) return NULL;
     struct offload_entry *e = offload_find(guest_path);
-    if (!e) return NULL;
+    if (!e || !native_offload_path_allowed(e->guest_name, guest_path) ||
+            native_offload_env_disabled(e->guest_name, envp))
+        return NULL;
+    if (generic_out) *generic_out = native_offload_name_is_generic(e->guest_name);
     // Return non-NULL to signal "offload this". For handler-only entries
     // (no native_path), return a sentinel so the caller proceeds to exec.
     return e->native_path ? e->native_path : "[builtin]";
+}
+
+const char *native_offload_lookup(const char *guest_path) {
+    return native_offload_lookup_exec(guest_path, NULL, NULL);
 }
 
 // --- Shared helpers ---
