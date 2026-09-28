@@ -18,7 +18,13 @@ static int proc_lookup(const char *path, struct proc_entry *entry) {
         unsigned long index = 0;
         struct proc_entry next_entry = {0};
         char entry_name[MAX_NAME];
-        while (proc_dir_read(entry, &index, &next_entry)) {
+        // Root lookup must not scan every PID below the requested name.
+        // Dynamic subdirectories retain their normal enumeration semantics.
+        bool root = entry->meta == &proc_root;
+        while (root ? proc_root_lookup(component, &next_entry) :
+                proc_dir_read(entry, &index, &next_entry)) {
+            if (root)
+                index = next_entry.index + 1;
             // tack on some dynamically generated attributes
             if (next_entry.meta->parent == NULL)
                 next_entry.meta->parent = entry->meta;
@@ -28,6 +34,8 @@ static int proc_lookup(const char *path, struct proc_entry *entry) {
             if (next_entry.meta->inode == 0)
                 next_entry.meta->inode = index + 1;
 
+            if (root)
+                goto found;
             proc_entry_getname(&next_entry, entry_name);
             if (strcmp(entry_name, component) == 0)
                 goto found;

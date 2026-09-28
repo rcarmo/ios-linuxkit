@@ -26,6 +26,7 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | Full-width seeks | `CC=clang make test-arm64-lseek-width` | Static raw-syscall/libc boundary oracle and guest Python sparse-file integration (Debian rootfs with Python required). |
 | proc mem seeks | `CC=clang make test-arm64-proc-mem-seek` | One static fixture natively and under iSH; checks `/proc/<pid>/mem` negative, wrapping, `SEEK_SET`/`SEEK_CUR` and rejected `SEEK_END` semantics. |
 | Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection and offload policy/exec guards. |
+| Procfs/exit stress | `CC=clang make test-arm64-proc-exit-race` | Actual-archive lock-order/high-PID lookup checks, native stress and two 25s guest runs with 16 forkers, six proc/ps readers, verified progress and shutdown. |
 | Release runtime | `make test-arm64-runtime-coverage` | Shell, package manager, C fixtures and language runtimes. |
 | Debug runtime | `make test-arm64-runtime-coverage-debug` | Same suite with the debug binary. |
 | CLI corner cases | `make test-arm64-cli-corner-smoke` | TUI, DNS, HTTPS, Git, Docker probes and command-line packages. |
@@ -144,8 +145,12 @@ preservation gates. Set `EVIDENCE_DIR` to retain the upstream runner's artifacts
 Minimal rootfs lanes can run internal-continuation fixtures with
 `HOST_CC=clang make ROOTFS_DIR="$PWD/debian-arm64-fakefs" test-arm64-internal-continue-fixtures`
 on native AArch64; this compiles the same static fixture on the host, not in the
-guest. The heavy procfs shell race remains an unresolved timeout; Darwin/iOS
-and ASan runtime validation are not established by the import.
+guest. The [procfs stress follow-up](reports/audits/PROCFS_EXIT_STRESS_2026-09-28.md)
+identifies the dash shutdown defect, hidden missing ps, expensive numeric lookup
+and a captured inode/PID/memory lock cycle. The corrected full-load gate passes
+release/debug with real ps and per-worker progress. An intermediate exit-139
+observation remains unattributed; these passes do not certify every lifetime
+race. Darwin/iOS and ASan runtime validation remain unestablished.
 
 Two pre-existing failures from the earlier run remain open:
 

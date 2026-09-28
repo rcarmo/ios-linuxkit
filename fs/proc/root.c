@@ -154,6 +154,32 @@ struct proc_dir_entry proc_root_entries[] = {
 };
 #define PROC_ROOT_LEN sizeof(proc_root_entries)/sizeof(proc_root_entries[0])
 
+bool proc_root_lookup(const char *name, struct proc_entry *entry) {
+    // Static entries (including self) retain their original identity/index.
+    for (size_t i = 0; i < PROC_ROOT_LEN; i++) {
+        if (!strcmp(name, proc_root_entries[i].name)) {
+            *entry = (struct proc_entry) {.meta = &proc_root_entries[i], .index = i};
+            return true;
+        }
+    }
+    // Match exactly the decimal names emitted by proc_pid_getname. Reject
+    // signs, leading zeroes and overflow before touching the PID table.
+    if (name[0] < '1' || name[0] > '9')
+        return false;
+    dword_t pid = 0;
+    for (const char *p = name; *p; p++) {
+        if (*p < '0' || *p > '9' || pid > (MAX_PID - (*p - '0')) / 10)
+            return false;
+        pid = pid * 10 + (*p - '0');
+    }
+    lock(&pids_lock);
+    bool exists = pid_get_task(pid) != NULL;
+    unlock(&pids_lock);
+    if (exists)
+        *entry = (struct proc_entry) {.meta = &proc_pid, .index = pid + PROC_ROOT_LEN - 1, .pid = pid};
+    return exists;
+}
+
 static bool proc_root_readdir(struct proc_entry *UNUSED(entry), unsigned long *index, struct proc_entry *next_entry) {
     if (*index < PROC_ROOT_LEN) {
         *next_entry = (struct proc_entry) {&proc_root_entries[*index], *index, NULL, NULL, 0, 0};

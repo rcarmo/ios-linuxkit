@@ -57,24 +57,20 @@ struct fd *generic_openat(struct fd *at, const char *path_raw, int flags, int mo
     fd->mount = mount;
 
     struct statbuf stat;
-    if (fd->inode != NULL) {
-        err = fd->mount->fs->fstat(fd, &stat);
-        if (err < 0)
-            goto error;
-    } else {
-        lock(&inodes_lock);
-        err = fd->mount->fs->fstat(fd, &stat);
-        if (err < 0) {
-            unlock(&inodes_lock);
-            goto error;
-        }
-        fd->inode = inode_get_unlocked(mount, stat.inode);
+    // Filesystem callbacks must not run under the global inode lock. Procfs
+    // fstat takes pids_lock; a proc reader can hold that while waiting on mm,
+    // whose unmap path holds mm while calling inode_release: a lock cycle.
+    // Fakefs already pins its inode during open, before metadata can vanish.
+    // Other filesystems retain their opened object through fd itself.
+    err = fd->mount->fs->fstat(fd, &stat);
+    if (err < 0)
+        goto error;
+    if (fd->inode == NULL) {
+        fd->inode = inode_get(mount, stat.inode);
         if (fd->inode == NULL) {
-            unlock(&inodes_lock);
             err = _ENOMEM;
             goto error;
         }
-        unlock(&inodes_lock);
     }
     fd->type = stat.mode & S_IFMT;
     fd->flags = flags;

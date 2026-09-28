@@ -68,6 +68,9 @@ extern struct proc_dir_entry proc_root;
 extern struct proc_dir_entry proc_pid;
 extern struct proc_children proc_ish_children;
 
+// Resolve root names without enumerating every PID up to the requested one.
+bool proc_root_lookup(const char *name, struct proc_entry *entry);
+
 mode_t_ proc_entry_mode(struct proc_entry *entry);
 void proc_entry_getname(struct proc_entry *entry, char *buf);
 int proc_entry_stat(struct proc_entry *entry, struct statbuf *stat);
