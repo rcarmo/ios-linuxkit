@@ -11,6 +11,10 @@
 #include "asbestos/asbestos.h"
 #include "asbestos/gen.h"
 #include "asbestos/frame.h"
+#ifdef ISH_JIT
+#include "asbestos/guest-arm64/jit.h"
+__thread struct fiber_frame *jit_active_frame;
+#endif
 #include "emu/cpu.h"
 #include "emu/interrupt.h"
 #include "emu/tlb.h"
@@ -577,6 +581,9 @@ void asbestos_free(struct asbestos *asbestos) {
         }
     }
     fiber_free_jetsam(asbestos);
+#ifdef ISH_JIT
+    jit_asbestos_free(asbestos);
+#endif
     free(asbestos->page_hash);
     free(asbestos->hash);
     free(asbestos);
@@ -728,7 +735,22 @@ static bool fiber_prechain_patch_slot(struct fiber_block *source, int i, struct 
         return false;
     if (target_addr != target->addr || PAGE(source->addr) != PAGE(target->addr))
         return false;
+#ifdef ISH_JIT
+    if (!jit_chain_ok(source, i, target)) {
+        if (jit_chain_refused(source, i, target)) {
+            // The slot remains fake, but the native alternate is a real
+            // pointer and needs the same invalidation ownership as a chain.
+            list_remove_safe(&source->jumps_from_links[i]);
+            list_add(&target->jumps_from[i], &source->jumps_from_links[i]);
+        }
+        return false;
+    }
+    list_remove_safe(&source->jumps_from_links[i]);
+#endif
     *source->jump_ip[i] = (unsigned long) target->code;
+#ifdef ISH_JIT
+    jit_link(source, i, target);
+#endif
     source->jump_ip_is_fake[i] = false;
     list_add(&target->jumps_from[i], &source->jumps_from_links[i]);
     return true;
@@ -807,9 +829,19 @@ static struct fiber_block *fiber_block_compile(addr_t ip, struct tlb *tlb) {
     struct gen_state state;
     TRACE("%d %08x --- compiling:\n", current_pid(), ip);
     gen_start(ip, &state);
+#ifdef ISH_JIT
+    struct jit_units *units = jit_units_begin();
+#endif
     while (!state.oom) {
+#ifdef ISH_JIT
+        struct jit_step step = jit_step_begin(&state);
+        bool more = gen_step(&state, tlb);
+        jit_step_end(units, &step, &state, more, tlb);
+        if (!more) break;
+#else
         if (!gen_step(&state, tlb))
             break;
+#endif
         // no block should span more than 2 pages
         // guarantee this by limiting total block size to 1 page
         // TODO refuse to decode implausibly long gadget streams
@@ -842,6 +874,9 @@ static struct fiber_block *fiber_block_compile(addr_t ip, struct tlb *tlb) {
         ARM64_BLOCK_STAT_INC(arm64_block_stats_jump1);
 #endif
     state.block->used = state.capacity;
+#ifdef ISH_JIT
+    jit_block(state.block, units);
+#endif
     return state.block;
 }
 
@@ -858,6 +893,9 @@ static void fiber_block_disconnect(struct asbestos *asbestos, struct fiber_block
         if (!list_null(&block->jumps_from_links[i])) {
             if (block->jump_ip[i] != NULL) {
                 *block->jump_ip[i] = block->old_jump_ip[i];
+#ifdef ISH_JIT
+                jit_unlink(block, i);
+#endif
 #ifdef GUEST_ARM64
                 block->jump_ip_is_fake[i] = true;
 #endif
@@ -869,6 +907,9 @@ static void fiber_block_disconnect(struct asbestos *asbestos, struct fiber_block
         list_for_each_entry_safe(&block->jumps_from[i], prev_block, tmp, jumps_from_links[i]) {
             if (prev_block->jump_ip[i] != NULL) {
                 *prev_block->jump_ip[i] = prev_block->old_jump_ip[i];
+#ifdef ISH_JIT
+                jit_unlink(prev_block, i);
+#endif
 #ifdef GUEST_ARM64
                 prev_block->jump_ip_is_fake[i] = true;
 #endif
@@ -880,6 +921,9 @@ static void fiber_block_disconnect(struct asbestos *asbestos, struct fiber_block
 
 static void fiber_block_free(struct asbestos *asbestos, struct fiber_block *block) {
     fiber_block_disconnect(asbestos, block);
+#ifdef ISH_JIT
+    jit_block_free(block);
+#endif
     free(block);
 }
 
@@ -887,6 +931,9 @@ static void fiber_free_jetsam(struct asbestos *asbestos) {
     struct fiber_block *block, *tmp;
     list_for_each_entry_safe(&asbestos->jetsam, block, tmp, jetsam) {
         list_remove(&block->jetsam);
+#ifdef ISH_JIT
+        jit_block_free(block);
+#endif
         free(block);
     }
 }
@@ -1019,6 +1066,21 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
                         if ((*last_block->jump_ip[i] & 0xffffffff) != block->addr)
                             continue;
 #endif
+#ifdef ISH_JIT
+                        if (!jit_chain_ok(last_block, i, block)) {
+                            if (jit_chain_refused(last_block, i, block)) {
+                                // A refused edge still owns an alternate
+                                // code pointer. Disconnect it before its
+                                // target is reclaimed; repeated retries must
+                                // not insert the same list node twice.
+                                list_remove_safe(&last_block->jumps_from_links[i]);
+                                list_add(&block->jumps_from[i], &last_block->jumps_from_links[i]);
+                            }
+                            continue;
+                        }
+                        list_remove_safe(&last_block->jumps_from_links[i]);
+                        jit_link(last_block, i, block);
+#endif
                         *last_block->jump_ip[i] = (unsigned long) block->code;
 #ifdef GUEST_ARM64
                         last_block->jump_ip_is_fake[i] = false;
@@ -1051,9 +1113,18 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
         jit_saved_pc = frame->cpu.pc;
         frame->jit_saved_pc = frame->cpu.pc;
 
+#ifdef ISH_JIT
+        frame->native_fault_host_pc = 0;
+        jit_active_frame = frame;
+        jit_exec_ready();
+#endif
         in_jit = 1;
         interrupt = fiber_enter(block, frame, tlb);
         in_jit = 0;
+#ifdef ISH_JIT
+        frame->native_fault_host_pc = 0;
+        jit_active_frame = NULL;
+#endif
 
         // Check if fiber_enter returned due to a JIT crash (signal handler
         // redirected PC to jit_crash_trampoline which returns INT_JIT_CRASH).

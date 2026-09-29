@@ -10,10 +10,10 @@ Files in this directory preserve dated evidence. They are not maintained procedu
 - [`releases/`](releases/) preserves source-release validation, production and staging snapshots; the latest source release is [2.2.2](releases/IOS_LINUXKIT_2.2.2.md).
 - [`workloads/`](workloads/) preserves workload investigations.
 
-Integration staging: [Alpine 3.24.2 preparation and native/AOT plan](audits/AOT_ALPINE_INTEGRATION_2026-09-29.md), including readiness/exit fixes and the diagnosed proc-stat/signal-frame lock inversion behind the intermittent stress timeout. Backend import is pending; this is not a release.
+Integration (not a release): [Alpine 3.24.2 native/AOT host proof](audits/AOT_ALPINE_HOST_2026-09-29.md) — default-off selective backend, four linked ELF images, Linux release/debug gates and modest/mixed measured results. iOS/device gates remain. [Prerequisite repairs](audits/AOT_ALPINE_INTEGRATION_2026-09-29.md) include the diagnosed proc-stat deadlock.
 
 Latest JIT audit: [Native JIT/AOT investigation — 29 September 2026](audits/JIT_AOT_INVESTIGATION_2026-09-29.md)
 records frozen experimental branches, native-oracle probes, adoption blockers and
-selective CLI recovery hardening. No experimental backend is enabled.
+selective CLI recovery hardening. The experimental backend remains disabled by default.
 
 Use the guides in the parent directory for current build, validation and release boundaries. When citing a report, include its date, source revision, host and rootfs if the report supplies them.

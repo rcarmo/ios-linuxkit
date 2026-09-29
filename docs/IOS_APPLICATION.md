@@ -118,3 +118,12 @@ The [2.2.2 source release](reports/releases/IOS_LINUXKIT_2.2.2.md) hardens CLI c
 The [2.2.1 source release](reports/releases/IOS_LINUXKIT_2.2.1.md) fixes a cross-platform procfs lock-order cycle and costly numeric PID lookup, but its stress validation is Linux-only. Include concurrent procfs/ps scans during repeated fork/exec/exit in device smoke tests.
 
 The [2.2.0 source release](reports/releases/IOS_LINUXKIT_2.2.0.md) includes Darwin Mach-right cleanup, app thread-start error handling and consistent ARM64 launch environments alongside the userspace runtime imports. On the intended device build, check terminal/upgrade session creation, native-offload wrappers and opt-outs, timers and interrupted sleeps, repeated fork/exec/exit, memory pressure, precise load faults and foreground/background transitions. These Apple paths are source-reviewed, not device-validated here; Linux timing results do not establish iOS latency, thermals or battery use.
+
+### Experimental native/AOT boundary
+
+The integration branch now has a default-off Meson backend and a tested Linux
+ELF AOT-only CLI for Alpine 3.24.2. It is **not wired into these Xcode schemes**.
+Do not treat Linux image acceptance as Apple signing/device validation. The
+next app tranche needs consistent ABI flags, app recovery hooks, signed Mach-O
+image linkage, bundle-size review and device tests. See the
+[host integration report](reports/audits/AOT_ALPINE_HOST_2026-09-29.md).

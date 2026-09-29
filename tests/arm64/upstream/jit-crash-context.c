@@ -5,11 +5,8 @@
 #undef main
 #include <assert.h>
 
-__thread volatile sig_atomic_t in_jit;
-__thread volatile uint64_t jit_saved_pc;
-__thread volatile uint64_t jit_last_host_fault, jit_last_x7, jit_last_x10;
-__thread volatile int jit_crash_count;
-void jit_crash_trampoline(void) {}
+// TLS/trampoline definitions come from the candidate archives, matching its
+// optional native frame ABI; do not duplicate them in this host fixture.
 
 static void one_case(int sig, bool write_fault, bool precise) {
     struct fiber_frame frame = {0};

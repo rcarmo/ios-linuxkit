@@ -10,6 +10,8 @@ alpine-*-fakefs/
 debian-*-fakefs/
 
 node_modules
+__pycache__/
+*.pyc
 app/xtermjs/xterm-dist
 app/xtermjs/.cache
 

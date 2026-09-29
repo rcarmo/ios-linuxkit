@@ -15,6 +15,9 @@
 #include "emu/cpu.h"
 #include "emu/tlb.h"
 #include "asbestos/frame.h"
+#ifdef ISH_JIT
+#include "asbestos/guest-arm64/jit.h"
+#endif
 #include "asbestos/asbestos.h"
 #include "platform/host_context_aarch64.h"
 #include "xX_main_Xx.h"
@@ -64,6 +67,15 @@ static void crash_handler(int sig, siginfo_t *info, void *ctx) {
         ucontext_t *uc = (ucontext_t *)ctx;
 
         // _cpu is in x1 — pointer to cpu_state within fiber_frame
+        int native_recovered = 0;
+#ifdef ISH_JIT
+        native_recovered = jit_crash_recover(uc);
+        if (native_recovered < 0) {
+            static const char message[] = "unrecoverable native JIT/AOT fault\n";
+            (void) write(STDERR_FILENO, message, sizeof(message)-1);
+            _exit(139);
+        }
+#endif
         uint64_t cpu_ptr = host_ctx_aarch64_reg(uc, 1);
 
         // Reconstruct guest segfault_addr from registers.
@@ -83,15 +95,17 @@ static void crash_handler(int sig, siginfo_t *info, void *ctx) {
         int was_write = host_ctx_aarch64_fault_was_write(uc, info);
 
         // Write crash info directly to cpu_state via _cpu pointer
-        *(addr_t *)(cpu_ptr + CRASH_CPU_segfault_addr) = guest_addr;
-        *(bool *)(cpu_ptr + CRASH_CPU_segfault_was_write) = (bool)was_write;
-        // Restore guest PC to the latest faultable guest instruction for
-        // re-execution. This is usually more precise than the block-start TLS
-        // fallback and avoids re-running earlier side effects in the block.
-        uint64_t retry_pc = *(uint64_t *)(cpu_ptr + CRASH_LOCAL_jit_saved_pc);
-        if (retry_pc == 0)
-            retry_pc = (uint64_t)jit_saved_pc;
-        *(uint64_t *)(cpu_ptr + CRASH_CPU_pc) = retry_pc;
+        if (!native_recovered) {
+            *(addr_t *)(cpu_ptr + CRASH_CPU_segfault_addr) = guest_addr;
+            *(bool *)(cpu_ptr + CRASH_CPU_segfault_was_write) = (bool)was_write;
+            // Restore guest PC to the latest faultable guest instruction for
+            // re-execution. This is usually more precise than the block-start TLS
+            // fallback and avoids re-running earlier side effects in the block.
+            uint64_t retry_pc = *(uint64_t *)(cpu_ptr + CRASH_LOCAL_jit_saved_pc);
+            if (retry_pc == 0)
+                retry_pc = (uint64_t)jit_saved_pc;
+            *(uint64_t *)(cpu_ptr + CRASH_CPU_pc) = retry_pc;
+        }
 
         // Restore SP to the value saved by fiber_enter, so fiber_exit
         // can correctly pop the callee-saved register frame.

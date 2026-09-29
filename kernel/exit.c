@@ -11,6 +11,9 @@
 #include "fs/fd.h"
 #include "fs/tty.h"
 #include "platform/platform.h"
+#ifdef ISH_JIT
+#include "asbestos/guest-arm64/jit.h"
+#endif
 
 static void halt_system(void);
 
@@ -66,6 +69,14 @@ noreturn void do_exit(int status) {
         current = NULL;
         pthread_exit(NULL);
     }
+
+#ifdef ISH_JIT
+    // Before mm teardown: recordings need live module/context metadata. Only
+    // init writes the process-wide report, including exit() rather than just
+    // exit_group(); child exits must not truncate the shared recording.
+    if (current->pid == 1)
+        jit_report();
+#endif
 
     // Block SIGSEGV during exit to prevent cosmetic crashes from host
     // pthread stack unwinding (especially with many threads exiting at once).

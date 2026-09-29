@@ -27,13 +27,15 @@ check() {
 check "$TMP/offload-policy.log" 'ALL PASSED' "$TMP/offload-policy"
 # Host-linked injection uses the actual candidate archives, not mock kernels.
 BUILD_DIR=$(dirname "$ISH_BIN")
+HOST_DEFS=(-DGUEST_ARM64=1 -DENGINE_ASBESTOS=1)
+if grep -q -- "-DISH_JIT=1" "$BUILD_DIR/compile_commands.json"; then HOST_DEFS+=(-DISH_JIT=1); fi
 libs=(-Wl,--start-group "$BUILD_DIR/libish.a" "$BUILD_DIR/libish_emu.a" "$BUILD_DIR/libfakefs.a" -Wl,--end-group -lrt -lm -ldl -lsqlite3)
-"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/task-start.c" -Wl,--wrap=pthread_create "${libs[@]}" -o "$TMP/task-start"
-"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/jit-oom.c" -Wl,--wrap=calloc -Wl,--wrap=malloc -Wl,--wrap=do_exit_group "${libs[@]}" -o "$TMP/jit-oom"
-"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" \
-    -ffunction-sections -fdata-sections "$HERE/gen-oom.c" -Wl,--gc-sections -o "$TMP/gen-oom"
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" \
+    -ffunction-sections -fdata-sections "$HERE/gen-oom.c" "${libs[@]}" -pthread -Wl,--gc-sections -o "$TMP/gen-oom"
 lifecycle_marker() {
     case "$1" in
         sleep) echo sleep-deadline-signal-ok;;
@@ -41,18 +43,18 @@ lifecycle_marker() {
         orphan) echo orphan-last-close-ok;;
     esac
 }
-"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/anon-accounting.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 -Wl,--wrap=mprotect \
     "${libs[@]}" -o "$TMP/anon-accounting"
 check "$TMP/anon-accounting.log" 'anon-accounting-actual-kernel-ok' "$TMP/anon-accounting"
-"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/offload-exec.c" -Wl,--wrap=native_offload_lookup_exec -Wl,--wrap=native_offload_exec \
     "${libs[@]}" -o "$TMP/offload-exec"
 mkdir -p "$TMP/offload-root/bin" "$TMP/offload-root/usr/bin" "$TMP/offload-root/tmp"
 printf '#!/missing-interpreter\n' > "$TMP/offload-root/bin/ffmpeg"
 chmod 755 "$TMP/offload-root/bin/ffmpeg"
 check "$TMP/offload-exec.log" 'offload-exec-shebang-ok' "$TMP/offload-exec" "$TMP/offload-root"
-"$CC" -O2 -DGUEST_ARM64=1 -DENGINE_ASBESTOS=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/exit-current.c" -Wl,--wrap=pthread_exit "${libs[@]}" -o "$TMP/exit-current"
 check "$TMP/exit-current.log" 'exit-current-ok' "$TMP/exit-current"
 check "$TMP/task-start.log" 'task-start-rollback-ok' "$TMP/task-start"
@@ -61,8 +63,13 @@ check "$TMP/gen-oom.log" 'gen-oom-actual-emitter-ok' "$TMP/gen-oom"
 # The renamed/discarded CLI main loses C's implicit return-0 rule. Suppress
 # that warning only; exercise the real handler with an exact byte-footprint test.
 "$CC" -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-return-type \
-    -DGUEST_ARM64=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread -ffunction-sections -fdata-sections \
-    "$HERE/jit-crash-context.c" -Wl,--gc-sections -o "$TMP/jit-crash-context"
+    "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread -ffunction-sections -fdata-sections \
+    "$HERE/jit-crash-context.c" "${libs[@]}" -Wl,--gc-sections -o "$TMP/jit-crash-context"
+if [[ " ${HOST_DEFS[*]} " == *-DISH_JIT=1* ]]; then
+    "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+        "$HERE/native-links.c" "${libs[@]}" -o "$TMP/native-links"
+    check "$TMP/native-links.log" "native-refused-link-invalidation-ok" "$TMP/native-links"
+fi
 check "$TMP/jit-crash-context.log" 'jit-crash-context-ok cases=8' "$TMP/jit-crash-context"
 check "$TMP/native-subms.log" ', 0 failed' "$TMP/subms"
 check "$TMP/native-open-unlink.log" '8/8 workers clean' "$TMP/open-unlink"

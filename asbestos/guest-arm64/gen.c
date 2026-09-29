@@ -24,6 +24,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "asbestos/gen.h"
+#ifdef ISH_JIT
+#include "asbestos/guest-arm64/jit.h"
+#endif
 #include "emu/arch/arm64/decode.h"
 #include "emu/interrupt.h"
 
@@ -1039,8 +1042,12 @@ void gen_start(addr_t addr, struct gen_state *state) {
     struct fiber_block *block = malloc(sizeof(struct fiber_block) + state->capacity * sizeof(unsigned long));
     state->block = block;
     state->oom = block == NULL;
-    if (block != NULL)
+    if (block != NULL) {
         block->addr = addr;
+#ifdef ISH_JIT
+        jit_block_init(block);
+#endif
+    }
 }
 
 void gen_end(struct gen_state *state) {
@@ -2680,8 +2687,17 @@ static int gen_branch(struct gen_state *state, uint32_t insn) {
                 break;
             case 1:  // BLR
                 gen(state, (unsigned long) gadget_branch_link_reg);
+#ifdef ISH_JIT
+                gen(state, 0); // block self, patched by gen_end
+                gen(state, state->ip);
+                gen(state, (unsigned long) state->ip | (1UL << 63));
+                gen(state, rn);
+                state->block_patch_ip = state->size - 4;
+                state->jump_ip[0] = state->size - 2;
+#else
                 gen(state, rn);
                 gen(state, state->ip);  // return address
+#endif
                 break;
             case 2:  // RET
                 gen(state, (unsigned long) gadget_ret);

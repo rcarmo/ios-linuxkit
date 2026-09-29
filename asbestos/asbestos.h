@@ -48,6 +48,9 @@ struct asbestos {
 
     lock_t lock;
     wrlock_t jetsam_lock;
+#ifdef ISH_JIT
+    void *jit_ctxs;
+#endif
 };
 
 // this is roughly the average number of instructions in a basic block according to anonymous sources
@@ -82,6 +85,14 @@ struct fiber_block {
     struct list jetsam;
     bool is_jetsam;
 
+#ifdef ISH_JIT
+    uint32_t *native_link[2];
+    uint32_t native_link_orig[2];
+    uint32_t *native_loop;
+    uintptr_t native_entry;
+    void *jit_ctx;
+    unsigned jit_idx;
+#endif
     unsigned long code[];
 };
 

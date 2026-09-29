@@ -8,6 +8,9 @@ CC ?= clang
 
 RELEASE_BUILD_DIR ?= build-arm64-linux
 DEBUG_BUILD_DIR ?= build-arm64-linux-debug
+NATIVE_BUILD_DIR ?= build-arm64-native-release
+AOT_RECORD_DIR ?= /workspace/tmp/ish-aot-targeted
+MESON_SETUP_ARGS ?=
 ROOTFS_DIR ?= $(CURDIR)/alpine-arm64-fakefs
 DEBIAN_ROOTFS_DIR ?= $(CURDIR)/debian-arm64-fakefs
 DEBIAN_SUITE ?= trixie
@@ -61,13 +64,29 @@ test-rootfs-download:
 
 .PHONY: build-arm64-linux
 build-arm64-linux:
-	@test -d "$(RELEASE_BUILD_DIR)" || CC="$(CC)" $(MESON) setup "$(RELEASE_BUILD_DIR)" -Dguest_arch=arm64 --buildtype=release
+	@test -d "$(RELEASE_BUILD_DIR)" || CC="$(CC)" $(MESON) setup "$(RELEASE_BUILD_DIR)" -Dguest_arch=arm64 --buildtype=release $(MESON_SETUP_ARGS)
 	$(NINJA) -C "$(RELEASE_BUILD_DIR)"
 
 .PHONY: build-arm64-linux-debug
 build-arm64-linux-debug:
-	@test -d "$(DEBUG_BUILD_DIR)" || CC="$(CC)" $(MESON) setup "$(DEBUG_BUILD_DIR)" -Dguest_arch=arm64 --buildtype=debug
+	@test -d "$(DEBUG_BUILD_DIR)" || CC="$(CC)" $(MESON) setup "$(DEBUG_BUILD_DIR)" -Dguest_arch=arm64 --buildtype=debug $(MESON_SETUP_ARGS)
 	$(NINJA) -C "$(DEBUG_BUILD_DIR)"
+
+.PHONY: build-arm64-native test-arm64-native-emitter test-aot-generator record-arm64-aot test-arm64-linked-aot
+build-arm64-native:
+	$(MAKE) build-arm64-linux RELEASE_BUILD_DIR="$(NATIVE_BUILD_DIR)" CC=clang MESON_SETUP_ARGS='-Djit=true'
+
+test-arm64-native-emitter: build-arm64-native
+	BUILD_DIR="$(abspath $(NATIVE_BUILD_DIR))" bun tests/arm64/native-aot/run.ts
+
+test-aot-generator:
+	bun test tests/arm64/native-aot/generator.test.ts
+
+test-arm64-linked-aot:
+	ISH_BIN="$(abspath $(RELEASE_BUILD_DIR))/ish" ROOTFS="$(ROOTFS_DIR)" AOT_RECORD_DIR="$(AOT_RECORD_DIR)" bash tests/arm64/native-aot/run-linked.sh
+
+record-arm64-aot: build-arm64-native
+	bun tools/jit_aot/targeted.ts "$(abspath $(NATIVE_BUILD_DIR))/ish" "$(ROOTFS_DIR)" "$(AOT_RECORD_DIR)" elf
 
 .PHONY: build-arm64-linux-all
 build-arm64-linux-all: build-arm64-linux build-arm64-linux-debug

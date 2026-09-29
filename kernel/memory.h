@@ -92,6 +92,7 @@ struct data {
     // for display in /proc/pid/maps
     struct fd *fd;
     size_t file_offset;
+    int jit_mod; // module cache; unconditional for app/kernel layout parity
     const char *name;
 #if LEAK_DEBUG
     int pid;

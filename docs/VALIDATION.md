@@ -189,3 +189,16 @@ git status --short
 ```
 
 Run the focused regression and the release runtime gate for behavioural changes. Use the debug gate for memory, signal, concurrency and translated-execution changes. Check Markdown links after moving documentation. Version or release changes must also follow [RELEASES.md](RELEASES.md).
+
+## Experimental native/AOT host gate (default off)
+
+On the isolated integration branch, use `make test-aot-generator` and
+`make test-arm64-native-emitter` for image failure handling, native instruction
+oracles and precise fault restart. `make record-arm64-aot` discovers the four
+Alpine module versions; `make test-arm64-linked-aot` requires a separately linked
+`jit_emit=false` CLI and checks real workload outputs and image use.
+
+Build recipe, evidence matrix, fresh-process performance and platform limits:
+[Alpine native/AOT host integration](reports/audits/AOT_ALPINE_HOST_2026-09-29.md).
+Passing Linux gates does not enable the backend in Xcode or validate signed iOS
+images. Keep the default/app gadget engine until those separate gates pass.

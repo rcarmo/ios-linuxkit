@@ -1,5 +1,11 @@
 # Native/AOT integration staging — 29 September 2026
 
+## Follow-up
+
+This report preserves the prerequisite checkpoint. See [native/AOT host integration](AOT_ALPINE_HOST_2026-09-29.md)
+for the subsequent selective port, four Alpine images, Linux tests, timings and
+remaining iOS gates. The pending-import statements below are historical.
+
 ## Scope and references
 
 User authorised shipping the current engine first, then selective native/AOT

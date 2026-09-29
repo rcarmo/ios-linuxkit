@@ -1,3 +1,6 @@
+#ifndef ASBESTOS_FRAME_H
+#define ASBESTOS_FRAME_H
+
 #include <stdatomic.h>
 #include "emu/cpu.h"
 
@@ -14,4 +17,12 @@ struct fiber_frame {
     uint64_t jit_exit_sp; // host sp value that fiber_exit expects (set by fiber_enter)
     addr_t jit_saved_pc; // precise guest PC to retry after an async JIT host fault
     long ret_cache[FIBER_RETURN_CACHE_SIZE]; // a map of ip to pointer-to-call-gadget-arguments
+#ifdef ISH_JIT
+    uintptr_t native_fault_host_pc;
+    uint64_t native_fault_guest_pc;
+    uint64_t native_fault_addr;
+    uint64_t native_fault_write;
+#endif
 };
+
+#endif
