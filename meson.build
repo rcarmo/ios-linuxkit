@@ -171,6 +171,8 @@ if get_option('kernel') == 'ish'
     ish = declare_dependency(
         link_with: [libish, libish_emu, libfakefs],
         dependencies: dependencies,
+        # main.c checks its recovery fields against the generated assembly ABI.
+        sources: offsets,
         include_directories: includes)
 
     if not meson.is_cross_build()

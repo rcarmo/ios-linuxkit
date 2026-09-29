@@ -46,6 +46,15 @@ extern void jit_crash_trampoline(void);
 #define CRASH_LOCAL_jit_exit_sp offsetof(struct fiber_frame, jit_exit_sp)
 #define CRASH_LOCAL_jit_saved_pc offsetof(struct fiber_frame, jit_saved_pc)
 
+// The assembly recovery path consumes these same fields. Make layout drift a
+// build failure, including the local precise-retry slot (not present upstream).
+#include "cpu-offsets.h"
+_Static_assert(CRASH_CPU_pc == CPU_pc, "cpu-offsets drift: pc");
+_Static_assert(CRASH_CPU_segfault_addr == CPU_segfault_addr, "cpu-offsets drift: segfault_addr");
+_Static_assert(CRASH_CPU_segfault_was_write == CPU_segfault_was_write, "cpu-offsets drift: segfault_was_write");
+_Static_assert(CRASH_LOCAL_jit_exit_sp == LOCAL_jit_exit_sp, "cpu-offsets drift: jit_exit_sp");
+_Static_assert(CRASH_LOCAL_jit_saved_pc == LOCAL_jit_saved_pc, "cpu-offsets drift: jit_saved_pc");
+
 static void crash_handler(int sig, siginfo_t *info, void *ctx) {
 #ifdef __aarch64__
     // If we're inside JIT code and got SIGSEGV/SIGBUS, recover by redirecting
@@ -74,8 +83,8 @@ static void crash_handler(int sig, siginfo_t *info, void *ctx) {
         int was_write = host_ctx_aarch64_fault_was_write(uc, info);
 
         // Write crash info directly to cpu_state via _cpu pointer
-        *(uint64_t *)(cpu_ptr + CRASH_CPU_segfault_addr) = guest_addr;
-        *(int *)(cpu_ptr + CRASH_CPU_segfault_was_write) = was_write;
+        *(addr_t *)(cpu_ptr + CRASH_CPU_segfault_addr) = guest_addr;
+        *(bool *)(cpu_ptr + CRASH_CPU_segfault_was_write) = (bool)was_write;
         // Restore guest PC to the latest faultable guest instruction for
         // re-execution. This is usually more precise than the block-start TLS
         // fallback and avoids re-running earlier side effects in the block.

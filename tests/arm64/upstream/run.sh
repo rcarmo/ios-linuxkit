@@ -55,6 +55,12 @@ check "$TMP/offload-exec.log" 'offload-exec-shebang-ok' "$TMP/offload-exec" "$TM
 check "$TMP/task-start.log" 'task-start-rollback-ok' "$TMP/task-start"
 check "$TMP/jit-oom.log" 'jit-oom-guest-kill-dispatch-ok' "$TMP/jit-oom"
 check "$TMP/gen-oom.log" 'gen-oom-actual-emitter-ok' "$TMP/gen-oom"
+# The renamed/discarded CLI main loses C's implicit return-0 rule. Suppress
+# that warning only; exercise the real handler with an exact byte-footprint test.
+"$CC" -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-return-type \
+    -DGUEST_ARM64=1 -I"$PROJECT" -I"$BUILD_DIR" -pthread -ffunction-sections -fdata-sections \
+    "$HERE/jit-crash-context.c" -Wl,--gc-sections -o "$TMP/jit-crash-context"
+check "$TMP/jit-crash-context.log" 'jit-crash-context-ok cases=8' "$TMP/jit-crash-context"
 check "$TMP/native-subms.log" ', 0 failed' "$TMP/subms"
 check "$TMP/native-open-unlink.log" '8/8 workers clean' "$TMP/open-unlink"
 for mode in sleep proc orphan; do
@@ -79,4 +85,4 @@ check "$TMP/guest-subms.log" ', 0 failed' "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-
 for mode in sleep proc orphan; do
     check "$TMP/guest-lifecycle-$mode.log" "$(lifecycle_marker "$mode")" "$ISH_BIN" -f "$ROOTFS" /tmp/upstream-regress/lifecycle "$mode"
 done
-echo 'upstream-correctness-gate-ok: FMOV512; syscall52; timer/flags/signal; sleep/proc/orphan; subms; JIT OOM; failed-start rollback'
+echo 'upstream-correctness-gate-ok: FMOV512; syscall52; timer/flags/signal; sleep/proc/orphan; subms; JIT OOM/crash context; failed-start rollback'

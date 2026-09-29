@@ -25,7 +25,7 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | CPU poke delivery | `CC=clang make test-arm64-poke-stress` | Native oracle and five guest repetitions of acknowledged signals to a compute-bound process. |
 | Full-width seeks | `CC=clang make test-arm64-lseek-width` | Static raw-syscall/libc boundary oracle and guest Python sparse-file integration (Debian rootfs with Python required). |
 | proc mem seeks | `CC=clang make test-arm64-proc-mem-seek` | One static fixture natively and under iSH; checks `/proc/<pid>/mem` negative, wrapping, `SEEK_SET`/`SEEK_CUR` and rejected `SEEK_END` semantics. |
-| Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection and offload policy/exec guards. |
+| Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection, real CLI crash-context checks and offload policy/exec guards. |
 | Procfs/exit stress | `CC=clang make test-arm64-proc-exit-race` | Actual-archive lock-order/high-PID lookup checks, native stress and two 25s guest runs with 16 forkers, six proc/ps readers, verified progress and shutdown. |
 | Release runtime | `make test-arm64-runtime-coverage` | Shell, package manager, C fixtures and language runtimes. |
 | Debug runtime | `make test-arm64-runtime-coverage-debug` | Same suite with the debug binary. |
@@ -49,6 +49,21 @@ make test-arm64-runtime-coverage \
 The default `ROOTFS_LANES` includes both Alpine and Debian. Override it when only one prepared rootfs exists. The Debian target can create `debian-arm64-fakefs`, but it uses `sudo debootstrap`, downloads packages and deletes its temporary output directories; inspect the Makefile recipe before running it.
 
 Cold Go caches can exceed the ordinary timeout because Alpine may ship standard-library source without precompiled archives. Increase `TIMEOUT_S` for a cold toolchain instead of classifying a harness kill as a pass.
+
+## CLI crash recovery (2026-09-29)
+
+`make test-arm64-upstream` also invokes the real CLI crash handler with synthetic
+host contexts: eight SIGSEGV/SIGBUS, read/write and precise/fallback-PC cases
+verify its exact frame-write footprint and SP/trampoline handoff. The unchanged
+baseline overwrites three padding bytes beside the write-fault boolean; the fix
+stores one byte. C/assembly recovery offsets are compile-time checked, with an
+explicit generated-header dependency. This does not certify live host signal
+recovery or explain the earlier unattributed exit 139.
+
+Fresh release/debug builds pass the seven focused gates and 14/14 continuation
+fixtures each. Native-JIT/AOT emitter probes and adoption blockers are documented
+in [the dated investigation](reports/audits/JIT_AOT_INVESTIGATION_2026-09-29.md).
+The experimental backend remains disabled and is not imported.
 
 ## Runtime coverage stages
 

@@ -10,4 +10,8 @@ Files in this directory preserve dated evidence. They are not maintained procedu
 - [`releases/`](releases/) preserves source-release validation, production and staging snapshots; the latest source release is [2.2.1](releases/IOS_LINUXKIT_2.2.1.md).
 - [`workloads/`](workloads/) preserves workload investigations.
 
+Latest JIT audit: [Native JIT/AOT investigation — 29 September 2026](audits/JIT_AOT_INVESTIGATION_2026-09-29.md)
+records frozen experimental branches, native-oracle probes, adoption blockers and
+selective CLI recovery hardening. No experimental backend is enabled.
+
 Use the guides in the parent directory for current build, validation and release boundaries. When citing a report, include its date, source revision, host and rootfs if the report supplies them.
