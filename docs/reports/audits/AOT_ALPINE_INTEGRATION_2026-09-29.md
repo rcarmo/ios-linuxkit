@@ -112,9 +112,34 @@ Debian rootfs**:
 After the exit fix, additional direct full Alpine stress runs passed: three
 release and three debug, plus one traced debug run. **One earlier post-fix release
 run timed out124 with an empty log and no captured stack. This remains an
-unattributed intermittent failure; later passes do not erase it.** Do not claim
-concurrency closure or use the branch as a new release yet. Darwin/iOS and
+unattributed intermittent failure at the first checkpoint; later passes did not
+erase it.** It was subsequently reproduced and diagnosed below. Darwin/iOS and
 sanitizer validation remain unavailable.
+
+### Retained timeout diagnosed: proc-stat / signal-frame lock inversion
+
+Full-load run14 hung again; run15 captured a core and lock ownership. Proc-stat
+held pids_lock and the target group lock, waiting for its sighand lock. That
+target was delivering a signal: sighand held → user_write_task → mem_ptr stack
+growth → rlimit → group lock. The two owners and mutex addresses establish the
+ABBA cycle; this is distinct from the earlier inode/mm and stale-TLS defects.
+
+`proc_pid_stat_show` now snapshots pending/blocked/ignored/caught fields under
+sighand separately, before taking general/group locks. pids_lock still protects
+task/sighand lifetime. No lock is simply omitted; the report is a snapshot, not
+an atomic view across unrelated subsystems. Existing signal-field encoding is
+preserved. The actual-archive `proc-stat-locks.c` wraps pthread_mutex_lock and
+requires group/general to be available when the callback takes sighand. Baseline
+aborts134 (both EBUSY16); fixed release/debug pass and preserve the signal fields.
+
+Validation after this fix: four full Alpine guest stress runs per build (eight
+in total), native controls, and two Debian guest stress runs per build all pass
+with unchanged25s/16forker/6reader denominators. Both builds also pass expanded
+upstream, poll/read, five preservation gates and14/14 continuation. Evidence is
+`timeout-investigation/` beneath the evidence directory, including `hang-14.log`,
+`hang-15.core`, raw lock-owner diagnostics and the deterministic negative test.
+These bounded tests address the captured cycle, not every possible concurrency
+fault. Backend integration and platform acceptance remain separate gates.
 
 ## Next selective integration steps
 
@@ -133,4 +158,5 @@ sanitizer validation remain unavailable.
 5. Fresh-process gadget/AOT-only comparisons, exact output checks and executed
    native coverage before performance claims. Old ABI7 images cannot be reused
    after checkpoint changes; integration layouts will determine the new ABI hash.
-6. Investigate the retained timeout before declaring integration acceptance.
+6. Retain full stress plus the deterministic proc-stat lock-order test throughout
+   integration; the formerly unattributed timeout is now diagnosed above.

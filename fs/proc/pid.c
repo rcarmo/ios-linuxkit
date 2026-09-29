@@ -31,9 +31,23 @@ static int proc_pid_stat_show(struct proc_entry *entry, struct proc_data *buf) {
     struct task *task = proc_get_task(entry);
     if (task == NULL)
         return _ESRCH;
+    // pids_lock keeps task/sighand alive. Snapshot signals separately: signal
+    // delivery holds sighand while writing a frame, and stack growth asks for
+    // rlimit under group->lock. Holding group (or general) while acquiring
+    // sighand reverses that order and can freeze all PID operations.
+    lock(&task->sighand->lock);
+    uint32_t pending = task->pending & 0xffffffff;
+    uint32_t blocked = task->blocked & 0xffffffff;
+    uint32_t ignored = 0, caught = 0;
+    for (int i = 0; i < 32; i++) {
+        if (task->sighand->action[i].handler == SIG_IGN_)
+            ignored |= 1u << i;
+        else if (task->sighand->action[i].handler != SIG_DFL_)
+            caught |= 1u << i;
+    }
+    unlock(&task->sighand->lock);
     lock(&task->general_lock);
     lock(&task->group->lock);
-    lock(&task->sighand->lock);
 
     proc_printf(buf, "%d ", task->pid);
     proc_printf(buf, "(%.16s) ", task->comm);
@@ -79,16 +93,8 @@ static int proc_pid_stat_show(struct proc_entry *entry, struct proc_data *buf) {
     proc_printf(buf, "%lu ", 0l); // kstkesp
     proc_printf(buf, "%lu ", 0l); // kstkeip
 
-    proc_printf(buf, "%lu ", (unsigned long) task->pending & 0xffffffff);
-    proc_printf(buf, "%lu ", (unsigned long) task->blocked & 0xffffffff);
-    uint32_t ignored = 0;
-    uint32_t caught = 0;
-    for (int i = 0; i < 32; i++) {
-        if (task->sighand->action[i].handler == SIG_IGN_)
-            ignored |= 1l << i;
-        else if (task->sighand->action[i].handler != SIG_DFL_)
-            caught |= 1l << i;
-    }
+    proc_printf(buf, "%lu ", (unsigned long) pending);
+    proc_printf(buf, "%lu ", (unsigned long) blocked);
     proc_printf(buf, "%lu ", (unsigned long) ignored);
     proc_printf(buf, "%lu ", (unsigned long) caught);
 
@@ -100,7 +106,6 @@ static int proc_pid_stat_show(struct proc_entry *entry, struct proc_data *buf) {
     // that's enough for now
     proc_printf(buf, "\n");
 
-    unlock(&task->sighand->lock);
     unlock(&task->group->lock);
     unlock(&task->general_lock);
     proc_put_task(task);
