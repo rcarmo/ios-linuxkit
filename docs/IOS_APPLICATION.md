@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.2.2 with Apple build number 812; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.3.0 with Apple build number 813; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 
@@ -60,7 +60,7 @@ Ninja then builds and links:
 
 ## Rootfs packaging
 
-`app/download-root.sh` downloads the URL in `ROOTFS_URL` into a temporary file, verifies the required `ROOTFS_SHA256`, then extracts `bin/busybox`, runs `file`, and verifies an AArch64 executable before atomically installing `root.tar.gz`. Failed fetches or validation leave an existing bundle archive unchanged. A changed URL must still point to the architecture named by `ROOTFS_ARCH` and needs a reviewed checksum. This integration branch pins Alpine 3.24.2; it does not automatically upgrade existing installed userlands.
+`app/download-root.sh` downloads the URL in `ROOTFS_URL` into a temporary file, verifies the required `ROOTFS_SHA256`, then extracts `bin/busybox`, runs `file`, and verifies an AArch64 executable before atomically installing `root.tar.gz`. Failed fetches or validation leave an existing bundle archive unchanged. A changed URL must still point to the architecture named by `ROOTFS_ARCH` and needs a reviewed checksum. The 2.3.0 source release pins Alpine 3.24.2; it does not automatically upgrade existing installed userlands.
 
 The build downloads from the network. Pin and review a new rootfs URL in `app/GuestARM64.xcconfig`; update package-version statements only after testing the packaged image.
 
@@ -113,6 +113,8 @@ Do not use the inherited upload lane for this fork until its scheme, bundle iden
 
 Linux-host validation can establish emulator and guest-runtime behaviour. It cannot validate Xcode compilation, entitlements, signing, installation, background behaviour or App Store processing. Run the relevant Linux gates before handoff, then build and smoke-test the exact iOS archive on macOS and a physical device.
 
+The [2.3.0 source release](reports/releases/IOS_LINUXKIT_2.3.0.md) includes the default-off backend and Alpine 3.24.2 packaging pin. It does not enable AOT in these schemes or upgrade existing installed userlands. The [native/AOT build plan](NATIVE_AOT_BUILD_PLAN.md) separates tested Linux commands from the remaining Apple implementation and acceptance gates.
+
 The [2.2.2 source release](reports/releases/IOS_LINUXKIT_2.2.2.md) hardens CLI crash-handler writes and C/assembly layout checks without enabling native JIT/AOT or changing the rootfs. Linux synthetic-context tests do not validate Apple signal return.
 
 The [2.2.1 source release](reports/releases/IOS_LINUXKIT_2.2.1.md) fixes a cross-platform procfs lock-order cycle and costly numeric PID lookup, but its stress validation is Linux-only. Include concurrent procfs/ps scans during repeated fork/exec/exit in device smoke tests.
@@ -121,9 +123,10 @@ The [2.2.0 source release](reports/releases/IOS_LINUXKIT_2.2.0.md) includes Darw
 
 ### Experimental native/AOT boundary
 
-The integration branch now has a default-off Meson backend and a tested Linux
+Master now has a default-off Meson backend and a tested Linux
 ELF AOT-only CLI for Alpine 3.24.2. It is **not wired into these Xcode schemes**.
 Do not treat Linux image acceptance as Apple signing/device validation. The
 next app tranche needs consistent ABI flags, app recovery hooks, signed Mach-O
 image linkage, bundle-size review and device tests. See the
-[host integration report](reports/audits/AOT_ALPINE_HOST_2026-09-29.md).
+[host integration report](reports/audits/AOT_ALPINE_HOST_2026-09-29.md) and
+[reproduction/rollout plan](NATIVE_AOT_BUILD_PLAN.md).

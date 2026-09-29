@@ -9,6 +9,7 @@ The maintained documentation describes the current `master` branch. Dated eviden
 | [ARCHITECTURE.md](ARCHITECTURE.md) | ARM64 decoder, gadget interpreter, memory model, userspace kernel and host boundaries. |
 | [LINUX_DEVELOPMENT.md](LINUX_DEVELOPMENT.md) | AArch64 Linux build, fakefs, command-line use and diagnostics. |
 | [IOS_APPLICATION.md](IOS_APPLICATION.md) | Xcode schemes, rootfs packaging, signing boundary and embedding interfaces. |
+| [NATIVE_AOT_BUILD_PLAN.md](NATIVE_AOT_BUILD_PLAN.md) | Local AOT reproduction, recording portability and outstanding iOS implementation/acceptance gates. |
 | [VALIDATION.md](VALIDATION.md) | Build and runtime gates, focused fixtures, reports and failure rules. |
 | [LIMITATIONS.md](LIMITATIONS.md) | Security model, compatibility shims, incomplete facilities and unsupported workloads. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Source, test and documentation requirements for changes. |
@@ -25,7 +26,7 @@ Reports record a result at a named date or revision. Paths, package versions and
 | [reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) | Load-dispatch profiling, precise fault-PC regression and paired measurements against 2.1.2. |
 | [reports/benchmarks/game/](reports/benchmarks/game/) | Benchmarks Game harness and per-language results. |
 | [reports/benchmarks/historical/](reports/benchmarks/historical/) | Retired x86/ARM64 compatibility and performance comparisons. |
-| [reports/releases/](reports/releases/) | Source-release validation, production baseline and staging records; latest: [2.2.2](reports/releases/IOS_LINUXKIT_2.2.2.md). |
+| [reports/releases/](reports/releases/) | Source-release validation, production baseline and staging records; latest: [2.3.0](reports/releases/IOS_LINUXKIT_2.3.0.md). |
 | [reports/workloads/](reports/workloads/) | Workload investigations such as `go-gte`. |
 
 ## Provenance

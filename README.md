@@ -4,7 +4,7 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
-The current source version is **2.2.2** with Apple build number **812**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. All executable host instructions come from the built application; the interpreter allocates only data for translated programs.
+The current source version is **2.3.0** with Apple build number **813**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/AOT backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
 
 ## What is in the repository
 
@@ -31,7 +31,7 @@ Clone the submodules and build:
 ```sh
 git clone --recurse-submodules https://github.com/rcarmo/ios-linuxkit.git
 cd ios-linuxkit
-make build-arm64-linux
+CC=clang make build-arm64-linux
 ```
 
 Run against the host filesystem:
@@ -43,9 +43,10 @@ Run against the host filesystem:
 To create an Alpine fakefs, download the root filesystem named in `app/GuestARM64.xcconfig`, then import it:
 
 ```sh
-curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.0-aarch64.tar.gz
+curl -fLO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.2-aarch64.tar.gz
+echo '9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773  alpine-minirootfs-3.24.2-aarch64.tar.gz' | sha256sum -c -
 ./build-arm64-linux/tools/fakefsify \
-  alpine-minirootfs-3.24.0-aarch64.tar.gz \
+  alpine-minirootfs-3.24.2-aarch64.tar.gz \
   alpine-arm64-fakefs
 ./build-arm64-linux/ish -f ./alpine-arm64-fakefs /bin/sh
 ```
@@ -76,6 +77,8 @@ The runtime and CLI targets can install packages into their fakefs. Use a dispos
 
 [The July 2026 OpenMinis audit](docs/reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records the repository-wide comparison at `35dac743` and the AdvSIMD conversion follow-up at `40f1bf40`. The follow-up added `FCVTN`, `FCVTN2`, `FCVTXN` and `FCVTXN2`; clean Clang release and debug builds and the native-oracle/guest fixture passed. The earlier broad suite reached 82/83 because the tested rootfs Clojure package lacked `clojure.main`.
 
+[Source release 2.3.0](docs/reports/releases/IOS_LINUXKIT_2.3.0.md) merges the default-off native/AOT backend, targeted musl/BusyBox/Python/zlib recording pipeline, Alpine 3.24.2 packaging pin and integration correctness fixes. Linux AOT-only execution is validated; measured gains are modest and Python regresses. Existing userlands are not migrated, and no accelerated iOS build is implied. See the [local accelerated-build and iOS rollout plan](docs/NATIVE_AOT_BUILD_PLAN.md).
+
 [Source release 2.2.2](docs/reports/releases/IOS_LINUXKIT_2.2.2.md) hardens the current engine's CLI crash handler: correct-width fault-flag stores, compile-time C/assembly layout checks and the generated-header build dependency. Fresh release/debug builds pass seven focused gates, 14/14 continuation checks and four exact native-oracle comparisons each. This patch does not include the experimental native/AOT backend or change the packaged userland.
 
 [Source release 2.2.1](docs/reports/releases/IOS_LINUXKIT_2.2.1.md) fixes a captured procfs inode/PID/memory lock cycle and replaces repeated PID-table scanning with bounded numeric lookup. The full procfs/exit gate now checks its tools, tracks worker PIDs explicitly and requires useful work from every fork/proc/ps worker. The [investigation](docs/reports/audits/PROCFS_EXIT_STRESS_2026-09-28.md) separates the original shell-harness timeout from the real lock cycle and records negative regressions, repeated passes and residual limitations.
@@ -92,6 +95,7 @@ The runtime and CLI targets can install packages into their fakefs. Use a dispos
 | [Architecture](docs/ARCHITECTURE.md) | Interpreter, memory, kernel and host boundaries. |
 | [Linux development](docs/LINUX_DEVELOPMENT.md) | Building, fakefs creation, command-line use and diagnostics. |
 | [iOS application](docs/IOS_APPLICATION.md) | Xcode schemes, rootfs packaging and host integration. |
+| [Native/AOT build plan](docs/NATIVE_AOT_BUILD_PLAN.md) | Reproducing local AOT and gating recording reuse, Mach-O linkage and device rollout. |
 | [Validation](docs/VALIDATION.md) | Test gates, reports and failure rules. |
 | [Limitations](docs/LIMITATIONS.md) | Security, compatibility and unsupported workloads. |
 | [Contributing](docs/CONTRIBUTING.md) | Change and documentation requirements. |

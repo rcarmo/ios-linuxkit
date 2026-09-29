@@ -90,6 +90,10 @@ Meson stores compiler and option choices in the build directory. Use `meson conf
 
 The supported Clang build uses Clang's integrated assembler. GNU `as` rejects named-register `.req` syntax used by the existing AArch64 gadget sources; the July 2026 audit reproduced that failure on the pre-audit baseline.
 
+For the optional recorder and linked no-emission AOT CLI, use the
+[native/AOT build plan](NATIVE_AOT_BUILD_PLAN.md). Ordinary builds below remain
+gadget-only.
+
 ## Run with realfs
 
 `-r` mounts a host directory as the guest root:
@@ -117,9 +121,10 @@ The program after these options is the initial guest process. There is no separa
 The rootfs URL and architecture are defined in `app/GuestARM64.xcconfig`. At the time of this rewrite they name Alpine 3.24.0 for AArch64:
 
 ```sh
-curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.0-aarch64.tar.gz
+curl -fLO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.2-aarch64.tar.gz
+echo '9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773  alpine-minirootfs-3.24.2-aarch64.tar.gz' | sha256sum -c -
 ./build-arm64-linux/tools/fakefsify \
-  alpine-minirootfs-3.24.0-aarch64.tar.gz \
+  alpine-minirootfs-3.24.2-aarch64.tar.gz \
   alpine-arm64-fakefs
 ./build-arm64-linux/ish -f ./alpine-arm64-fakefs /bin/sh
 ```

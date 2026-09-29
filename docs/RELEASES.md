@@ -1,6 +1,6 @@
 # Versioning and releases
 
-The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.2.2**, Apple build **812**, tagged as `v2.2.2` after validation. See the [2.2.2 source release record](reports/releases/IOS_LINUXKIT_2.2.2.md).
+The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.3.0**, Apple build **813**, tagged as `v2.3.0` after validation. See the [2.3.0 source release record](reports/releases/IOS_LINUXKIT_2.3.0.md).
 
 ## Version sources
 
@@ -68,17 +68,17 @@ Commit the version, documentation and release evidence together. Push the commit
 
 ```sh
 git push origin master
-git tag -a v2.2.2 -m 'ios-linuxkit 2.2.2'
-git push origin v2.2.2
+git tag -a v2.3.0 -m 'ios-linuxkit 2.3.0'
+git push origin v2.3.0
 ```
 
-Replace `2.2.2` with the version in `app/AppARM64.xcconfig`. Verify all three references:
+Replace `2.3.0` with the version in `app/AppARM64.xcconfig`. Verify all three references:
 
 ```sh
 git rev-parse HEAD
 git rev-parse origin/master
-git rev-list -n 1 v2.2.2
-git ls-remote origin refs/heads/master refs/tags/v2.2.2 'refs/tags/v2.2.2^{}'
+git rev-list -n 1 v2.3.0
+git ls-remote origin refs/heads/master refs/tags/v2.3.0 'refs/tags/v2.3.0^{}'
 ```
 
 A Git tag records source provenance. It does not prove that an iOS archive was signed, installed or uploaded.
