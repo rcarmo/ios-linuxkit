@@ -82,6 +82,10 @@ test-arm64-native-emitter: build-arm64-native
 test-aot-generator:
 	bun test tests/arm64/native-aot/generator.test.ts
 
+.PHONY: test-aot-kit
+test-aot-kit:
+	bun test tests/arm64/native-aot/kit.test.ts
+
 test-arm64-linked-aot:
 	ISH_BIN="$(abspath $(RELEASE_BUILD_DIR))/ish" ROOTFS="$(ROOTFS_DIR)" AOT_RECORD_DIR="$(AOT_RECORD_DIR)" bash tests/arm64/native-aot/run-linked.sh
 
