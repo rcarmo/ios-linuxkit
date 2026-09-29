@@ -104,24 +104,34 @@ export function matchContract(header:any, contract:any, binaryHash:string) {
  if(contract.binarySha256!==binaryHash||contract.arch!=='aarch64'||contract.endian!=='little'||contract.pointerBits!==64)throw Error('target binary/architecture mismatch');
  if(!contract.evidence)throw Error('target contract requires provenance of runtime/layout observation');
 }
+export async function extractModules(archive:string,root:string,modules:{path:string,sha256:string}[]) {
+ for(const i of modules){if(!/^\/[A-Za-z0-9/_.-]+$/.test(i.path)||i.path.split('/').includes('..'))throw Error('unsafe module path');
+ const dest=join(root,i.path);mkdirSync(dirname(dest),{recursive:true});
+ // Extract each exact regular module to stdout, not filesystem paths/symlinks.
+ // Uses host tar on Linux/macOS; never executes the retained Linux importer.
+ const r=Bun.spawnSync(['tar','-xOf',archive,'.'+i.path],{env:cleanEnv(),stdout:'pipe',stderr:'pipe',maxBuffer:128*1024*1024,timeout:120000});
+ if(r.exitCode!==0||r.signalCode)throw Error(`module extraction failed: ${i.path}`);
+ await Bun.write(dest,r.stdout);if(await sha(dest)!==i.sha256)throw Error(`module extraction hash mismatch: ${i.path}`);
+ }
+}
 async function generate(seed:string,out:string,format:string,symbolBinary?:string,contractFile?:string) {
  const m=await verify(seed);if(m.kind!=='seed'||!['elf','macho'].includes(format))throw Error('generate needs seed and elf|macho');
  if(format==='macho'&&(!symbolBinary||!contractFile))throw Error('Mach-O requires actual Apple symbol binary and observed target contract');
  const target=symbolBinary?resolve(symbolBinary):join(seed,'bin/recorder');const syms=symbols(target);const s=stageFor(out);
- const root=await restore(seed,join(s,'restored'));
+ const root=join(s,'modules');await extractModules(join(seed,'rootfs.tar.gz'),root,m.modules);
  const c=contractFile?JSON.parse(readFileSync(contractFile,'utf8')):null;
  if(format==='macho')requireAppleBinary(readFileSync(target).subarray(0,32),c.platform);
  const checks=[];
  for(const name of names){
-  const rec=join(seed,'recordings',name+'.jsonl');let header:any;const required=new Set<string>();
+  const rec=join(seed,'recordings',name+'.jsonl');let header:any;const required=new Set<string>(['ish_aot_register']);
   for await(const line of createInterface({input:createReadStream(rec),crlfDelay:Infinity})) {const t=JSON.parse(line);if(t.header){header=t.header;continue;}for(const n of Object.values(t.keysym||{}))required.add(n as string);for(const seg of t.segs)for(const rel of seg.rel)if(rel[1]!=='exit')required.add(rel[2]);}
   if(c)matchContract(header,c,await sha(target));
   for(const n of required)if(n!=='@region'&&!syms.has(n))throw Error(`unresolved target symbol: ${n}`);
-  checked(['python3',join(project,'tools/jit_aot/gen.py'),rec,target,join(root,'data'),join(s,`aot_${name}.S`),'--name',name,'--format',format,'--family',''],join(s,name+'.log'));
+  checked(['python3',join(project,'tools/jit_aot/gen.py'),rec,target,root,join(s,`aot_${name}.S`),'--name',name,'--format',format,'--family',''],join(s,name+'.log'));
   checks.push({name,header,requiredSymbols:[...required].sort()});
  }
  await Bun.write(join(s,'workload.sh'),readFileSync(join(seed,'recordings/workload.sh')));
- require('node:fs').rmSync(join(s,'restored'),{recursive:true});
+ require('node:fs').rmSync(root,{recursive:true});
  await seal(s,out,{kind:'generated',format,seedManifestSha256:await sha(join(seed,'manifest.json')),targetBinarySha256:await sha(target),contract:c,checks,appleValidation:format==='macho'?'generation only; SDK/link/sign/device gates remain':'not applicable'});
 }
 async function build(seed:string,images:string,out:string) {

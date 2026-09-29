@@ -74,6 +74,10 @@ bun tools/jit_aot/kit.ts generate "$SEED" "$MACHO_IMAGES" macho \
   "$APPLE_SYMBOL_BINARY" "$OBSERVED_APPLE_CONTRACT"
 ```
 
+Generation extracts only the hash-checked module bytes using host `tar`; it does
+not execute the retained Linux recorder/importer on macOS. Install Bun, Python3
+and Apple command-line tools (`nm`) on the Mac. Use the same generator source.
+
 The contract JSON must contain numeric `abi`, `prologue_words`, `entry_off`,
 `n_pinned`, plus `binarySha256`, `arch: "aarch64"`, `endian: "little"`,
 `pointerBits: 64`, `platform` (`ios`, `ios-simulator` or `macos`) and nonempty

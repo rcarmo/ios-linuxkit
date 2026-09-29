@@ -63,9 +63,18 @@ Release and debug on independently restored guests:
 - Actual retained ABI9 musl image linked to fresh current no-emitter build:
   rejected ABI `0e35aac2`, current `3f650e41`, 0 installs, safe gadget shell exit.
   All rejected images turn the backend off, so no JIT stats footer is expected.
-- Tools: **8 kit tests /34 assertions**, generator **3/22**, local docs links.
+- Tools: **9 kit tests /36 assertions**, generator **3/22**, 55-file local docs links.
   Missing Apple target contract fails without publishing output. Guards require
   thin Mach-O ARM64, defined host symbols and matching binary-bound conventions.
+
+Clean-directory rehearsal: extract a committed source archive (no Git checkout),
+restore the guest, regenerate all four images byte-identically without retraining,
+build a new release CLI and pass linked no-emitter/off parity. Final portable
+module extraction repeats the byte-identical generation using host tar, without
+executing any retained Linux importer—needed for the later Mac conversion path.
+The delivered launcher passes with hostile inherited recording knobs removed and
+runtime-off rollback working. Archive/checksum verification is the final delivery
+step; fresh source/guest/image/build evidence is retained separately.
 
 Evidence is retained under `linux/evidence/` in the published local bundle.
 Build caches originally lived in `linux.partial-2036279`; absolute paths in raw
@@ -112,7 +121,9 @@ source/provenance, contract schema instructions and checked Mach-O generation.
 It is deliberately **not** a set of certified iOS images. Actual Apple target
 binary/layout observations are required; Linux ELF cannot masquerade as a
 Mach-O target, undefined symbols cannot satisfy requirements, and `--abi` is
-never used to force compatibility. If incompatible, re-record with a matching
+never used to force compatibility. Generation uses host tar to extract exact
+module bytes, not a Linux executable on the Mac. This portable extraction is
+tested on Linux; the Apple SDK path itself remains pending. If incompatible, re-record with a matching
 Darwin/target-layout recorder and repeat validation. A matching hash alone is
 not proof of ISA/context correctness.
 
