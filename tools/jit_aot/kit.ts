@@ -96,7 +96,9 @@ async function restore(seed:string,out:string) {
  for(const i of m.modules)if(await sha(join(root,'data',i.path))!==i.sha256)throw Error(`restored module mismatch ${i.name}`);
  renameSync(s,out);return join(out,'root');
 }
-function symbols(binary:string){const all=new Set(checked(['nm','-g',binary]).split('\n').filter(x=>x.trim()).map(x=>x.trim().split(/\s+/).at(-1)!));const map=new Map<string,string>();for(const n of all)map.set(n.startsWith('_')?n.slice(1):n,n);for(const n of all)if(!n.startsWith('_'))map.set(n,n);return map;}
+export function definedSymbols(nm:string){const all=new Set(nm.split('\n').map(x=>x.trim().split(/\s+/)).filter(x=>x.length===3&&/^[0-9a-fA-F]+$/.test(x[0])&&/^[A-TV-Z]$/.test(x[1])).map(x=>x[2]));const map=new Map<string,string>();for(const n of all)map.set(n.startsWith('_')?n.slice(1):n,n);for(const n of all)if(!n.startsWith('_'))map.set(n,n);return map;}
+function symbols(binary:string){return definedSymbols(checked(['nm','-g',binary]));}
+export function requireAppleBinary(bytes:Uint8Array,platform:string){const d=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);if(bytes.length<32||d.getUint32(0,true)!==0xfeedfacf||d.getUint32(4,true)!==0x0100000c||!['ios','ios-simulator','macos'].includes(platform))throw Error('requires thin Mach-O ARM64 target and explicit Apple platform; ELF/fat binaries rejected');}
 export function matchContract(header:any, contract:any, binaryHash:string) {
  for(const k of ['abi','prologue_words','entry_off','n_pinned'])if(contract[k]!==header[k])throw Error(`target contract mismatch: ${k}`);
  if(contract.binarySha256!==binaryHash||contract.arch!=='aarch64'||contract.endian!=='little'||contract.pointerBits!==64)throw Error('target binary/architecture mismatch');
@@ -108,6 +110,7 @@ async function generate(seed:string,out:string,format:string,symbolBinary?:strin
  const target=symbolBinary?resolve(symbolBinary):join(seed,'bin/recorder');const syms=symbols(target);const s=stageFor(out);
  const root=await restore(seed,join(s,'restored'));
  const c=contractFile?JSON.parse(readFileSync(contractFile,'utf8')):null;
+ if(format==='macho')requireAppleBinary(readFileSync(target).subarray(0,32),c.platform);
  const checks=[];
  for(const name of names){
   const rec=join(seed,'recordings',name+'.jsonl');let header:any;const required=new Set<string>();

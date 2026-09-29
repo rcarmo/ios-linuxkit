@@ -76,11 +76,13 @@ bun tools/jit_aot/kit.ts generate "$SEED" "$MACHO_IMAGES" macho \
 
 The contract JSON must contain numeric `abi`, `prologue_words`, `entry_off`,
 `n_pinned`, plus `binarySha256`, `arch: "aarch64"`, `endian: "little"`,
-`pointerBits: 64` and nonempty `evidence` identifying actual target runtime/layout
+`pointerBits: 64`, `platform` (`ios`, `ios-simulator` or `macos`) and nonempty
+`evidence` identifying actual target runtime/layout
 observations. Obtain these from the bootstrap target's `/proc/ish/jit`,
 `jit_abi()` and debugger/layout inspection using its real SDK/flags, not by
 copying the Linux header. The command checks every header, binary hash and
-required host symbol, with Mach-O underscore handling. It never overrides ABI.
+required defined host symbol, with Mach-O underscore handling. It requires a
+thin ARM64 Mach-O symbol binary, rejects undefined imports and never overrides ABI.
 The source generator also rejects unnamed code relocations; the kit adds checks
 for gadget key symbols, which could otherwise be null. Missing symbols or ABI
 mismatch fail before publication. These are rejection guards, not proof of ABI
@@ -106,5 +108,5 @@ parity; hardware PC hits within all four images with emitter region NULL;
 upstream, poll, FCVT, precise load-PC, seek/poke, continuation and full procfs
 stress; exact native-restart/oracle tests; deliberate incompatible image rejection;
 fresh-process performance/startup/memory/size measurements; clean-directory
-restore and offline regeneration without retraining. Final prototype evidence
-will record passed gates and explicit Apple pending gates separately.
+restore and offline regeneration without retraining. [Prototype evidence](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md)
+records passed gates and explicit Apple pending gates separately.

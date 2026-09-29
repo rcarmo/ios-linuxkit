@@ -2,6 +2,9 @@
 
 Status: **2.3.0 / Apple build 813**, 29 September 2026. Master includes the
 selective backend port; ordinary Meson and Xcode builds remain gadget-only.
+A [durable artifact prototype](NATIVE_AOT_ARTIFACT_KIT.md) now implements the
+local bundle and checked recording handoff stages; its dated evidence records
+what passed and what remains Apple-only.
 The local Linux pipeline below works. The Apple section is an **implementation
 and validation plan**, not a working accelerated Xcode recipe.
 
@@ -187,8 +190,9 @@ guard, **not** proof of cross-platform execution correctness.
 `gen.py` resolves recorded host names against `nm -g` of the binary supplied as
 its second positional argument. It handles Mach-O leading underscores and emits
 Mach-O sections, PAGE/PAGEOFF relocations and module constructors by default.
-Unnameable translations may be omitted: compare accepted/skipped counts and
-coverage, not just generator exit status. `targeted.ts ... macho` alone still
+Unnamed code relocations cause generation to fail; missing gadget-key symbols
+need separate checking (the artifact-kit wrapper requires defined symbols).
+Compare translation counts and coverage, not just generator exit status. `targeted.ts ... macho` alone still
 supplies its **recorder** binary's symbol map; it is not a Linux-to-iOS converter.
 
 For an Apple bootstrap binary with compatible exported symbols, the intended

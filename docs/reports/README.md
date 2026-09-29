@@ -16,4 +16,6 @@ Latest JIT audit: [Native JIT/AOT investigation — 29 September 2026](audits/JI
 records frozen experimental branches, native-oracle probes, adoption blockers and
 selective CLI recovery hardening. The experimental backend remains disabled by default.
 
+Prototype: [Durable AOT artifact kit](audits/AOT_ARTIFACT_KIT_2026-09-29.md) records a reusable Alpine image/recording seed, Linux release/debug no-emitter builds, restored-guest acceptance, measured regressions and explicit Apple handoff gates. No new release or iOS enablement.
+
 Use the guides in the parent directory for current build, validation and release boundaries. When citing a report, include its date, source revision, host and rootfs if the report supplies them.
