@@ -67,7 +67,12 @@ struct poll *poll_create() {
 }
 
 static inline bool poll_fd_is_real(struct poll_fd *pollfd) {
-    return pollfd->fd->ops->poll == realfs_poll;
+    // poll/select accept regular files and directories as immediately ready,
+    // but the host epoll backend rejects their registration with EPERM. Keep
+    // them in the userspace readiness scan instead. Guest epoll_ctl has its
+    // own explicit regular-file/directory rejection and remains unchanged.
+    mode_t_ type = pollfd->fd->type;
+    return pollfd->fd->ops->poll == realfs_poll && type != S_IFREG && type != S_IFDIR;
 }
 
 // does not do its own locking

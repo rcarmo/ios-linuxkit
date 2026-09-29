@@ -10,5 +10,6 @@ ISH_LOGGER_iphoneos = nslog
 ISH_LOGGER_iphonesimulator = nslog
 ISH_LOGGER_macosx = dprintf
 
-ROOTFS_URL = dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.0-aarch64.tar.gz
+ROOTFS_URL = dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.2-aarch64.tar.gz
+ROOTFS_SHA256 = 9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773
 ROOTFS_ARCH = aarch64

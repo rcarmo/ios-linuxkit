@@ -25,7 +25,9 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | CPU poke delivery | `CC=clang make test-arm64-poke-stress` | Native oracle and five guest repetitions of acknowledged signals to a compute-bound process. |
 | Full-width seeks | `CC=clang make test-arm64-lseek-width` | Static raw-syscall/libc boundary oracle and guest Python sparse-file integration (Debian rootfs with Python required). |
 | proc mem seeks | `CC=clang make test-arm64-proc-mem-seek` | One static fixture natively and under iSH; checks `/proc/<pid>/mem` negative, wrapping, `SEEK_SET`/`SEEK_CUR` and rejected `SEEK_END` semantics. |
-| Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection, real CLI crash-context checks and offload policy/exec guards. |
+| Rootfs packaging | `make test-rootfs-download` | Good archive acceptance; failed fetch/hash/architecture and malformed/missing pin preserve the prior bundle. |
+| Regular-file readiness | `CC=clang make ROOTFS_DIR=/path/to/fakefs test-arm64-poll-regular` | Native oracle and guest poll/ppoll/select/pselect, access modes/EOF/dup/directory, mixed pipe readiness, epoll semantics and actual shell read. |
+| Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection, normal-exit TLS handoff, real CLI crash-context checks and offload policy/exec guards. |
 | Procfs/exit stress | `CC=clang make test-arm64-proc-exit-race` | Actual-archive lock-order/high-PID lookup checks, native stress and two 25s guest runs with 16 forkers, six proc/ps readers, verified progress and shutdown. |
 | Release runtime | `make test-arm64-runtime-coverage` | Shell, package manager, C fixtures and language runtimes. |
 | Debug runtime | `make test-arm64-runtime-coverage-debug` | Same suite with the debug binary. |

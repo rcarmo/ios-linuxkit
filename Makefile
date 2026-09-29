@@ -55,6 +55,10 @@ help:
 check-docs:
 	bun scripts/check-markdown-links.ts
 
+.PHONY: test-rootfs-download
+test-rootfs-download:
+	sh tests/arm64/rootfs/download-root.sh
+
 .PHONY: build-arm64-linux
 build-arm64-linux:
 	@test -d "$(RELEASE_BUILD_DIR)" || CC="$(CC)" $(MESON) setup "$(RELEASE_BUILD_DIR)" -Dguest_arch=arm64 --buildtype=release
@@ -153,6 +157,11 @@ test-arm64-proc-mem-seek: build-arm64-linux $(DEBIAN_ROOTFS_DIR)
 	ROOTFS="$(DEBIAN_ROOTFS_DIR)" \
 	TIMEOUT_S="$(TIMEOUT_S)" \
 	./tests/arm64/proc/run-proc-mem-seek.sh
+
+.PHONY: test-arm64-poll-regular
+test-arm64-poll-regular: build-arm64-linux
+	CC="$(CC)" ISH_BIN="$(abspath $(RELEASE_BUILD_DIR))/ish" \
+	ROOTFS="$(ROOTFS_DIR)" bash tests/arm64/fs/run-poll-regular.sh
 
 .PHONY: test-arm64-lseek-width
 test-arm64-lseek-width: build-arm64-linux $(DEBIAN_ROOTFS_DIR)

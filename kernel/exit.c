@@ -193,11 +193,14 @@ noreturn void do_exit(int status) {
     }
 
     vfork_notify(current);
-    if (current != leader) {
-        struct task *self = current;
-        current = NULL;  // Clear before destroy to prevent dangling access
+    struct task *self = current;
+    // Normal exit has already released mm (no deferred cleanup ownership).
+    // Once pids_lock is dropped, the parent can reap even a group leader and
+    // free/reuse its struct before pthread cleanup runs. Never leave that
+    // cleanup a dangling TLS pointer; non-leaders need the same handoff.
+    current = NULL;
+    if (self != leader)
         task_destroy(self);
-    }
     unlock(&pids_lock);
 
     pthread_exit(NULL);

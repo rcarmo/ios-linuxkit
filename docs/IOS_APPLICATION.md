@@ -60,7 +60,7 @@ Ninja then builds and links:
 
 ## Rootfs packaging
 
-`app/download-root.sh` downloads the URL in `ROOTFS_URL` into the application bundle as `root.tar.gz`. Before accepting it, the script extracts `bin/busybox`, runs `file`, and verifies an AArch64 executable. A changed URL must still point to the architecture named by `ROOTFS_ARCH`.
+`app/download-root.sh` downloads the URL in `ROOTFS_URL` into a temporary file, verifies the required `ROOTFS_SHA256`, then extracts `bin/busybox`, runs `file`, and verifies an AArch64 executable before atomically installing `root.tar.gz`. Failed fetches or validation leave an existing bundle archive unchanged. A changed URL must still point to the architecture named by `ROOTFS_ARCH` and needs a reviewed checksum. This integration branch pins Alpine 3.24.2; it does not automatically upgrade existing installed userlands.
 
 The build downloads from the network. Pin and review a new rootfs URL in `app/GuestARM64.xcconfig`; update package-version statements only after testing the packaged image.
 

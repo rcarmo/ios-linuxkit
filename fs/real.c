@@ -285,6 +285,11 @@ off_t realfs_lseek(struct fd *fd, off_t offset, int whence) {
 }
 
 int realfs_poll(struct fd *fd) {
+    // Linux poll/select report regular files and directories ready for both
+    // directions regardless of open access mode or EOF. No host registration
+    // is needed; read/write themselves still enforce mode and file semantics.
+    if (fd->type == S_IFREG || fd->type == S_IFDIR)
+        return POLLIN | POLLOUT;
     struct pollfd p = {.fd = fd->real_fd, .events = POLLPRI};
     // prevent POLLNVAL
     int flags = fcntl(fd->real_fd, F_GETFL, 0);

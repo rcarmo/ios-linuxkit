@@ -10,6 +10,8 @@ Files in this directory preserve dated evidence. They are not maintained procedu
 - [`releases/`](releases/) preserves source-release validation, production and staging snapshots; the latest source release is [2.2.2](releases/IOS_LINUXKIT_2.2.2.md).
 - [`workloads/`](workloads/) preserves workload investigations.
 
+Integration staging: [Alpine 3.24.2 preparation and native/AOT plan](audits/AOT_ALPINE_INTEGRATION_2026-09-29.md), including readiness/exit fixes and an unresolved intermittent stress timeout. Backend import is pending; this is not a release.
+
 Latest JIT audit: [Native JIT/AOT investigation — 29 September 2026](audits/JIT_AOT_INVESTIGATION_2026-09-29.md)
 records frozen experimental branches, native-oracle probes, adoption blockers and
 selective CLI recovery hardening. No experimental backend is enabled.
