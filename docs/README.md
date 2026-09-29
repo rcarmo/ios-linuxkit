@@ -25,7 +25,7 @@ Reports record a result at a named date or revision. Paths, package versions and
 | [reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) | Load-dispatch profiling, precise fault-PC regression and paired measurements against 2.1.2. |
 | [reports/benchmarks/game/](reports/benchmarks/game/) | Benchmarks Game harness and per-language results. |
 | [reports/benchmarks/historical/](reports/benchmarks/historical/) | Retired x86/ARM64 compatibility and performance comparisons. |
-| [reports/releases/](reports/releases/) | Source-release validation, production baseline and staging records; latest: [2.2.1](reports/releases/IOS_LINUXKIT_2.2.1.md). |
+| [reports/releases/](reports/releases/) | Source-release validation, production baseline and staging records; latest: [2.2.2](reports/releases/IOS_LINUXKIT_2.2.2.md). |
 | [reports/workloads/](reports/workloads/) | Workload investigations such as `go-gte`. |
 
 ## Provenance

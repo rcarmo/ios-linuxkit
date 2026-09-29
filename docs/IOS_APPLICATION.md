@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.2.1 with Apple build number 811; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.2.2 with Apple build number 812; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 
@@ -112,6 +112,8 @@ Do not use the inherited upload lane for this fork until its scheme, bundle iden
 ## Release boundary
 
 Linux-host validation can establish emulator and guest-runtime behaviour. It cannot validate Xcode compilation, entitlements, signing, installation, background behaviour or App Store processing. Run the relevant Linux gates before handoff, then build and smoke-test the exact iOS archive on macOS and a physical device.
+
+The [2.2.2 source release](reports/releases/IOS_LINUXKIT_2.2.2.md) hardens CLI crash-handler writes and C/assembly layout checks without enabling native JIT/AOT or changing the rootfs. Linux synthetic-context tests do not validate Apple signal return.
 
 The [2.2.1 source release](reports/releases/IOS_LINUXKIT_2.2.1.md) fixes a cross-platform procfs lock-order cycle and costly numeric PID lookup, but its stress validation is Linux-only. Include concurrent procfs/ps scans during repeated fork/exec/exit in device smoke tests.
 

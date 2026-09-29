@@ -4,7 +4,7 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
-The current source version is **2.2.1** with Apple build number **811**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. All executable host instructions come from the built application; the interpreter allocates only data for translated programs.
+The current source version is **2.2.2** with Apple build number **812**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. All executable host instructions come from the built application; the interpreter allocates only data for translated programs.
 
 ## What is in the repository
 
@@ -75,6 +75,8 @@ curl -LO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-min
 The runtime and CLI targets can install packages into their fakefs. Use a disposable copy when package state matters. Reports are written to `REPORT_DIR`, which defaults to `/workspace/tmp`.
 
 [The July 2026 OpenMinis audit](docs/reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records the repository-wide comparison at `35dac743` and the AdvSIMD conversion follow-up at `40f1bf40`. The follow-up added `FCVTN`, `FCVTN2`, `FCVTXN` and `FCVTXN2`; clean Clang release and debug builds and the native-oracle/guest fixture passed. The earlier broad suite reached 82/83 because the tested rootfs Clojure package lacked `clojure.main`.
+
+[Source release 2.2.2](docs/reports/releases/IOS_LINUXKIT_2.2.2.md) hardens the current engine's CLI crash handler: correct-width fault-flag stores, compile-time C/assembly layout checks and the generated-header build dependency. Fresh release/debug builds pass seven focused gates, 14/14 continuation checks and four exact native-oracle comparisons each. This patch does not include the experimental native/AOT backend or change the packaged userland.
 
 [Source release 2.2.1](docs/reports/releases/IOS_LINUXKIT_2.2.1.md) fixes a captured procfs inode/PID/memory lock cycle and replaces repeated PID-table scanning with bounded numeric lookup. The full procfs/exit gate now checks its tools, tracks worker PIDs explicitly and requires useful work from every fork/proc/ps worker. The [investigation](docs/reports/audits/PROCFS_EXIT_STRESS_2026-09-28.md) separates the original shell-harness timeout from the real lock cycle and records negative regressions, repeated passes and residual limitations.
 
