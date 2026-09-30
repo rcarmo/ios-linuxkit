@@ -9,6 +9,8 @@
 #include "kernel/calls.h"
 #include "kernel/memory.h"
 #include "kernel/mm.h"
+#include "kernel/memory_policy.h"
+#include "util/timer.h"
 #include "fs/real.h"
 static bool fail_data, fail_map, fail_protect;
 void *__real_malloc(size_t);
@@ -25,6 +27,26 @@ int __real_mprotect(void *, size_t, int);
 int __wrap_mprotect(void *a, size_t n, int p) {
     if (fail_protect) { fail_protect = false; errno = ENOMEM; return -1; }
     return __real_mprotect(a, n, p);
+}
+static uint64_t sampler_time;
+static void *sample_writer(void *unused) {
+    (void) unused;
+    for (unsigned i = 0; i < 20000; i++) {
+        uint64_t allowance = (i & 1) ? 100 * PAGE_SIZE : 200 * PAGE_SIZE;
+        assert(ish_memory_policy_update((struct ish_memory_sample) {
+            allowance, allowance / 2, sampler_time, false}));
+    }
+    return NULL;
+}
+static void *sample_reader(void *unused) {
+    (void) unused;
+    for (unsigned i = 0; i < 20000; i++) {
+        struct ish_memory_sample sample; bool brake;
+        assert(ish_memory_policy_snapshot(&sample, &brake));
+        assert(sample.available_bytes == sample.allowance_bytes / 2 && !brake);
+        assert(sample.monotonic_ms == sampler_time && !sample.critical);
+    }
+    return NULL;
 }
 static void count(long expected) {
     long actual = atomic_load(&anon_page_count);
@@ -97,6 +119,68 @@ int main(void) {
     count(ANON_MMAP_LIMIT_PAGES);
     assert(mem_pt(current->mem, 0x40) == NULL);
     atomic_store(&anon_page_count, 0);
+    // Experimental additional brake uses actual mapping admission, while the
+    // hard guest ledger and rollback remain authoritative. No Apple feed here.
+    ish_memory_policy_enable(true);
+    assert(pt_map_nothing(current->mem, 0x50, 1, P_READ) == _ENOMEM); count(0);
+    struct timespec clock = timespec_now(CLOCK_MONOTONIC);
+    uint64_t now = (uint64_t) clock.tv_sec * 1000 + clock.tv_nsec / 1000000;
+    const uint64_t allowance = 100 * PAGE_SIZE;
+    struct ish_memory_sample sample = {allowance, 20 * PAGE_SIZE, now, false};
+    assert(ish_memory_policy_update(sample));
+    assert(pt_map_nothing(current->mem, 0x50, 1, P_READ) == 0); count(1);
+    assert(pt_unmap(current->mem, 0x50, 1) == 0); count(0);
+    sample.available_bytes = 9 * PAGE_SIZE;
+    assert(ish_memory_policy_update(sample));
+    assert(pt_map_nothing(current->mem, 0x50, 1, P_READ) == _ENOMEM); count(0);
+    sample.available_bytes = 14 * PAGE_SIZE;
+    assert(ish_memory_policy_update(sample));
+    assert(!anon_pages_reserve(1)); count(0); // Hysteresis retains brake.
+    sample.available_bytes = 15 * PAGE_SIZE;
+    assert(ish_memory_policy_update(sample));
+    assert(anon_pages_reserve(1)); anon_pages_unreserve(1); count(0);
+    sample.critical = true;
+    assert(ish_memory_policy_update(sample));
+    assert(!anon_pages_reserve(1));
+    // PROT_NONE stays uncharged and allowed even when ordinary commits brake.
+    assert(pt_map_nothing(current->mem, 0x50, 1, 0) == 0); count(0);
+    assert(pt_unmap(current->mem, 0x50, 1) == 0);
+    struct ish_memory_sample copy; bool braked;
+    assert(ish_memory_policy_snapshot(&copy, &braked) && braked);
+    sample.available_bytes = allowance + 1;
+    assert(!ish_memory_policy_update(sample));
+    sample.available_bytes = allowance; sample.monotonic_ms = now - 1;
+    assert(!ish_memory_policy_update(sample));
+    assert(ish_memory_policy_snapshot(&sample, &braked) && sample.critical);
+    ish_memory_policy_enable(true);
+    sample = (struct ish_memory_sample) {allowance, allowance, now - 3000, false};
+    assert(ish_memory_policy_update(sample));
+    assert(!anon_pages_reserve(1)); count(0); // Stale fail closed.
+    ish_memory_policy_enable(true);
+    sample.monotonic_ms = now + 100000;
+    assert(ish_memory_policy_update(sample));
+    assert(!anon_pages_reserve(1)); count(0); // Future timestamp invalid at admission.
+    ish_memory_policy_enable(true);
+    clock = timespec_now(CLOCK_MONOTONIC);
+    sample.monotonic_ms = (uint64_t) clock.tv_sec * 1000 + clock.tv_nsec / 1000000;
+    assert(ish_memory_policy_update(sample));
+    assert(!anon_pages_reserve(101)); count(0); // Larger than sampled availability.
+    atomic_store(&anon_page_count, ANON_MMAP_LIMIT_PAGES);
+    assert(!anon_pages_reserve(1)); // Pressure feed never bypasses the hard ceiling.
+    atomic_store(&anon_page_count, 0);
+    fail_data = true;
+    assert(pt_map_nothing(current->mem, 0x50, 1, P_READ) == _ENOMEM); count(0);
+    assert(mem_pt(current->mem, 0x50) == NULL);
+    sample.available_bytes = allowance / 2;
+    assert(ish_memory_policy_update(sample));
+    sampler_time = sample.monotonic_ms;
+    pthread_t writer, reader;
+    assert(pthread_create(&writer, NULL, sample_writer, NULL) == 0);
+    assert(pthread_create(&reader, NULL, sample_reader, NULL) == 0);
+    assert(pthread_join(writer, NULL) == 0 && pthread_join(reader, NULL) == 0);
+    ish_memory_policy_enable(false);
+    assert(anon_pages_reserve(1)); anon_pages_unreserve(1); count(0);
+    puts("memory-policy-actual-kernel-ok: coherent feed, hysteresis, stale/future, hard cap, rollback");
     puts("anon-accounting-actual-kernel-ok");
     return 0;
 }

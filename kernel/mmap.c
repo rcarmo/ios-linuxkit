@@ -7,11 +7,72 @@
 #include "fs/fd.h"
 #include "kernel/memory.h"
 #include "kernel/mm.h"
+#include "kernel/memory_policy.h"
+#include "util/timer.h"
+
+// Separate from mapping ownership/accounting. This short lock makes sampler
+// fields and hysteresis one coherent state; no platform callback runs under it.
+static lock_t memory_policy_lock = LOCK_INITIALIZER;
+static bool memory_policy_enabled, memory_policy_valid, memory_policy_braked;
+static struct ish_memory_sample memory_policy_sample;
+
+void ish_memory_policy_enable(bool enabled) {
+    lock(&memory_policy_lock);
+    memory_policy_enabled = enabled;
+    memory_policy_valid = false;
+    memory_policy_braked = enabled;
+    memory_policy_sample = (struct ish_memory_sample) {0};
+    unlock(&memory_policy_lock);
+}
+
+bool ish_memory_policy_update(struct ish_memory_sample sample) {
+    lock(&memory_policy_lock);
+    bool valid = memory_policy_enabled && sample.allowance_bytes &&
+        sample.available_bytes <= sample.allowance_bytes && sample.monotonic_ms &&
+        (!memory_policy_valid || sample.monotonic_ms >= memory_policy_sample.monotonic_ms);
+    if (valid) {
+        uint64_t threshold = memory_policy_braked ?
+            sample.allowance_bytes / 100 * 15 + sample.allowance_bytes % 100 * 15 / 100 :
+            sample.allowance_bytes / 10;
+        memory_policy_braked = sample.critical || sample.available_bytes < threshold;
+        memory_policy_sample = sample;
+        memory_policy_valid = true;
+    }
+    unlock(&memory_policy_lock);
+    return valid;
+}
+
+bool ish_memory_policy_snapshot(struct ish_memory_sample *sample, bool *braked) {
+    lock(&memory_policy_lock);
+    *sample = memory_policy_sample;
+    *braked = memory_policy_braked;
+    bool enabled = memory_policy_enabled;
+    unlock(&memory_policy_lock);
+    return enabled;
+}
+
+static bool memory_policy_admit(long pages) {
+    if (pages < 0) return false;
+    if (pages == 0) return true;
+    lock(&memory_policy_lock);
+    bool ok = true;
+    if (memory_policy_enabled) {
+        struct timespec clock = timespec_now(CLOCK_MONOTONIC);
+        uint64_t now = (uint64_t) clock.tv_sec * 1000 + clock.tv_nsec / 1000000;
+        ok = memory_policy_valid && !memory_policy_braked &&
+            now >= memory_policy_sample.monotonic_ms &&
+            now - memory_policy_sample.monotonic_ms <= 2000 &&
+            (uint64_t) pages <= memory_policy_sample.available_bytes / PAGE_SIZE;
+    }
+    unlock(&memory_policy_lock);
+    return ok;
+}
 
 #if ANON_MMAP_LIMIT_PAGES > 0
 _Atomic long anon_page_count;
 
 bool anon_pages_reserve(long pages) {
+    if (!memory_policy_admit(pages)) return false;
     long count = atomic_load(&anon_page_count);
     do {
         if (pages > ANON_MMAP_LIMIT_PAGES || count > ANON_MMAP_LIMIT_PAGES - pages)
