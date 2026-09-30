@@ -216,6 +216,12 @@ test-arm64-proc-exit-race: build-arm64-linux
 	ROOTFS="$(DEBIAN_ROOTFS_DIR)" \
 	./tests/arm64/proc/run-proc-exit-race.sh
 
+.PHONY: test-arm64-netlink
+test-arm64-netlink: build-arm64-linux
+	@test -n "$(NETLINK_REALFS)" || { echo 'set NETLINK_REALFS to a disposable realfs root' >&2; exit 2; }
+	CC_GUEST="$(if $(CC_GUEST),$(CC_GUEST),aarch64-linux-musl-gcc)" \
+	./tests/regress/run_netlink.sh "$(abspath $(RELEASE_BUILD_DIR))/ish" "$(NETLINK_REALFS)"
+
 .PHONY: test-arm64-upstream
 test-arm64-upstream: build-arm64-linux
 	ISH_BIN="$(CURDIR)/$(RELEASE_BUILD_DIR)/ish" \

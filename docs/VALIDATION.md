@@ -8,6 +8,14 @@ The maintained gates run on an AArch64 Linux host. The July 2026 audit used an O
 
 Runtime tests modify their fakefs when they install missing packages. Copy the rootfs or rebuild it when package state must be reproducible. Network and package repositories can make broad suites non-deterministic even when the emulator is unchanged.
 
+## Route-netlink networking gate
+
+The opt-in [route-netlink guide](NETLINK_TAILSCALE.md) describes the native/guest
+message tests, bounded encoder sanitizers and an isolated official Tailscale
+probe. A control-server authentication URL is not proof of account login or
+tunnel traffic. The default-off switch, route/notification limits and Apple-device
+gates must remain explicit in release evidence.
+
 ## Build gate
 
 ```sh

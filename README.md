@@ -4,7 +4,7 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
-The current source version is **2.3.1** with Apple build number **814**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
+The current source version is **2.3.2** with Apple build number **815**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
 
 ## What is in the repository
 
@@ -111,6 +111,7 @@ hosts and guests named in each report.
 | [Linux development](docs/LINUX_DEVELOPMENT.md) | Building, fakefs creation, command-line use and diagnostics. |
 | [iOS application](docs/IOS_APPLICATION.md) | Xcode schemes, rootfs packaging and host integration. |
 | [Linux AOT](docs/NATIVE_AOT_BUILD_PLAN.md) | Recording, linking, running, testing and measuring local AOT. |
+| [Route-netlink and Tailscale](docs/NETLINK_TAILSCALE.md) | Opt-in host interface discovery and isolated userspace networking tests. |
 | [AOT artifacts](docs/NATIVE_AOT_ARTIFACT_KIT.md) | Freezing, restoring, validating and publishing reusable inputs/builds. |
 | [iOS AOT](docs/NATIVE_AOT_IOS.md) | Target compatibility checks, Mach-O conversion and Apple integration. |
 | [Validation](docs/VALIDATION.md) | Test gates, reports and failure rules. |

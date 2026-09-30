@@ -63,6 +63,11 @@ struct fd {
             uint8_t unix_name_len;
             char unix_name[108];
             struct fd *unix_peer; // locked by peer_lock, for simplicity
+            // Opt-in route-netlink state (socketpair reply endpoint).
+            int netlink_peer_fd;
+            uint32_t netlink_port, netlink_groups;
+            bool netlink_bound;
+            struct list netlink_link;
             cond_t unix_got_peer;
             // Queue of struct scm for sending file descriptors
             // locked by fd->lock

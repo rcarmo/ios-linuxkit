@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <netinet/tcp.h>
+#include <net/if.h>
 #include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -17,6 +18,206 @@
 
 const struct fd_ops socket_fdops;
 
+// Opt-in, read-only route-netlink compatibility. Replies use a bounded datagram
+// socketpair so existing poll/epoll readiness follows the receive queue. Never
+// block the sending guest waiting for itself to drain that queue.
+#include "fs/netlink.h"
+
+bool ish_netlink_stub_enabled(void) {
+    const char *v = getenv("ISH_NETLINK_STUB");
+    return v != NULL && strcmp(v, "1") == 0;
+}
+
+static lock_t netlink_lock = LOCK_INITIALIZER;
+static struct list netlink_sockets = LIST_INITIALIZER(netlink_sockets);
+static uint32_t netlink_next_port = 0x80000000;
+static int sock_wait_readable(int hostfd);
+
+static bool fd_is_netlink_stub(struct fd *fd) {
+    return fd != NULL && fd->ops == &socket_fdops && fd->socket.domain == AF_NETLINK_;
+}
+static bool netlink_port_used(uint32_t port, struct fd *except) {
+    struct fd *fd;
+    list_for_each_entry(&netlink_sockets, fd, socket.netlink_link)
+        if (fd != except && fd->socket.netlink_port == port) return true;
+    return false;
+}
+static int netlink_name(struct fd *fd, addr_t addr, uint32_t capacity) {
+    lock(&netlink_lock);
+    struct sockaddr_nl_ nl = { .family = AF_NETLINK_,
+        .pid = fd->socket.netlink_port, .groups = fd->socket.netlink_groups };
+    unlock(&netlink_lock);
+    if (capacity > sizeof(nl)) capacity = sizeof(nl);
+    return capacity && user_write(addr, &nl, capacity) ? _EFAULT : 0;
+}
+static int netlink_bind(struct fd *fd, addr_t addr, uint32_t size) {
+    struct sockaddr_nl_ nl;
+    if (size < sizeof(nl)) return _EINVAL;
+    if (user_get(addr, nl)) return _EFAULT;
+    if (nl.family != AF_NETLINK_) return _EINVAL;
+    lock(&netlink_lock);
+    int error = 0;
+    if (fd->socket.netlink_bound && nl.pid && nl.pid != fd->socket.netlink_port)
+        error = _EINVAL;
+    else if (nl.pid && netlink_port_used(nl.pid, fd)) error = _EADDRINUSE;
+    else {
+        if (nl.pid) fd->socket.netlink_port = nl.pid;
+        fd->socket.netlink_bound = true;
+        fd->socket.netlink_groups = nl.groups;
+    }
+    unlock(&netlink_lock);
+    // Group subscriptions are recorded but no multicast events are generated.
+    return error;
+}
+static int netlink_destination(addr_t addr, uint32_t size) {
+    if (!addr) return 0; // Implicit kernel destination.
+    struct sockaddr_nl_ nl;
+    if (size < sizeof(nl)) return _EINVAL;
+    if (user_get(addr, nl)) return _EFAULT;
+    if (nl.family != AF_NETLINK_) return _EINVAL;
+    return nl.pid || nl.groups ? _EPERM : 0;
+}
+static int netlink_stub_reply(struct fd *fd, const void *req, size_t size) {
+    if (size > NETLINK_BUFFER_SIZE) return _EMSGSIZE;
+    char reply[NETLINK_BUFFER_SIZE];
+    lock(&netlink_lock);
+    fd->socket.netlink_bound = true;
+    uint32_t port = fd->socket.netlink_port;
+    unlock(&netlink_lock);
+    int len = netlink_snapshot(req, size, port, reply, sizeof(reply));
+    if (len < 0) return len;
+    if (send(fd->socket.netlink_peer_fd, reply, len, MSG_DONTWAIT) < 0)
+        return errno_map();
+    return size;
+}
+static int netlink_receive(struct fd *fd, void *buf, size_t size, int flags) {
+    if (flags & ~(MSG_PEEK_ | MSG_DONTWAIT_ | MSG_TRUNC_)) return _EOPNOTSUPP;
+    int host_flags = (flags & MSG_PEEK_) ? MSG_PEEK : 0;
+    for (;;) {
+        int n = recv(fd->real_fd, buf, size, host_flags | MSG_DONTWAIT);
+        if (n >= 0) return n;
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+            return errno_map();
+        if ((flags & MSG_DONTWAIT_) || (fd_getflags(fd) & O_NONBLOCK_)) return _EAGAIN;
+        int err = sock_wait_readable(fd->real_fd);
+        if (err < 0) return err;
+    }
+}
+struct netlink_iov { addr_t base; size_t len; };
+static int netlink_iovs(addr_t addr, uint64_t count, struct netlink_iov *iov, size_t *size) {
+    if (count > 1024) return _EMSGSIZE;
+    *size = 0;
+    for (size_t i = 0; i < count; i++) {
+#ifdef GUEST_ARM64
+        struct iovec64_ iv;
+#else
+        struct iovec_ iv;
+#endif
+        if (user_get(addr + i * sizeof(iv), iv)) return _EFAULT;
+        if (iv.len > SIZE_MAX - *size) return _EMSGSIZE;
+        iov[i] = (struct netlink_iov) {(addr_t) iv.base, iv.len};
+        *size += iv.len;
+    }
+    return 0;
+}
+static int netlink_stub_sendmsg(struct fd *sock, addr_t addr, int flags) {
+    if (flags & ~(MSG_DONTWAIT_ | 0x4000 /* MSG_NOSIGNAL */)) return _EOPNOTSUPP;
+#ifdef GUEST_ARM64
+    struct msghdr64_ m;
+#else
+    struct msghdr_ m;
+#endif
+    if (user_get(addr, m)) return _EFAULT;
+    if (m.msg_controllen) return _EOPNOTSUPP;
+    int err = netlink_destination(m.msg_name, m.msg_namelen);
+    if (err < 0) return err;
+    struct netlink_iov iov[1024];
+    size_t total;
+    err = netlink_iovs(m.msg_iov, m.msg_iovlen, iov, &total);
+    if (err < 0) return err;
+    if (total > NETLINK_BUFFER_SIZE) return _EMSGSIZE;
+    char buf[NETLINK_BUFFER_SIZE];
+    size_t off = 0;
+    for (size_t i = 0; i < m.msg_iovlen; i++) {
+        if (iov[i].len && user_read(iov[i].base, buf + off, iov[i].len)) return _EFAULT;
+        off += iov[i].len;
+    }
+    return netlink_stub_reply(sock, buf, total);
+}
+static int netlink_stub_recvmsg(struct fd *sock, addr_t addr, int flags) {
+#ifdef GUEST_ARM64
+    struct msghdr64_ m;
+#else
+    struct msghdr_ m;
+#endif
+    if (user_get(addr, m)) return _EFAULT;
+    struct netlink_iov iov[1024];
+    size_t capacity;
+    int err = netlink_iovs(m.msg_iov, m.msg_iovlen, iov, &capacity);
+    if (err < 0) return err;
+    char buf[NETLINK_BUFFER_SIZE];
+    int n = netlink_receive(sock, buf, sizeof(buf), flags);
+    if (n < 0) return n;
+    size_t copied = 0;
+    for (size_t i = 0; i < m.msg_iovlen && copied < (size_t) n; i++) {
+        size_t len = iov[i].len;
+        if (len > (size_t) n - copied) len = n - copied;
+        if (len && user_write(iov[i].base, buf + copied, len)) return _EFAULT;
+        copied += len;
+    }
+    if (m.msg_name) {
+        struct sockaddr_nl_ sender = {.family = AF_NETLINK_};
+        size_t len = m.msg_namelen < sizeof(sender) ? m.msg_namelen : sizeof(sender);
+        if (len && user_write(m.msg_name, &sender, len)) return _EFAULT;
+        m.msg_namelen = sizeof(sender);
+    } else m.msg_namelen = 0;
+    m.msg_controllen = 0;
+    m.msg_flags = capacity < (size_t) n ? MSG_TRUNC_ : 0;
+    if (user_put(addr, m)) return _EFAULT;
+    return flags & MSG_TRUNC_ ? n : (int) copied;
+}
+static int netlink_recvfrom(struct fd *sock, addr_t buf_addr, size_t size, int flags,
+                            addr_t name, addr_t len_addr) {
+    uint32_t capacity = 0;
+    if (name && (!len_addr || user_get(len_addr, capacity))) return _EFAULT;
+    char buf[NETLINK_BUFFER_SIZE];
+    int n = netlink_receive(sock, buf, sizeof(buf), flags);
+    if (n < 0) return n;
+    size_t copied = size < (size_t) n ? size : (size_t) n;
+    if (copied && user_write(buf_addr, buf, copied)) return _EFAULT;
+    if (name) {
+        struct sockaddr_nl_ sender = {.family = AF_NETLINK_};
+        size_t len = capacity < sizeof(sender) ? capacity : sizeof(sender);
+        if (len && user_write(name, &sender, len)) return _EFAULT;
+        capacity = sizeof(sender);
+        if (user_put(len_addr, capacity)) return _EFAULT;
+    }
+    return flags & MSG_TRUNC_ ? n : (int) copied;
+}
+static fd_t netlink_stub_socket(dword_t type, dword_t protocol) {
+    if (protocol != NETLINK_ROUTE_) return _EPROTONOSUPPORT;
+    if ((type & SOCKET_TYPE_MASK) != SOCK_RAW_ && (type & SOCKET_TYPE_MASK) != SOCK_DGRAM_)
+        return _ESOCKTNOSUPPORT;
+    if (type & ~(SOCKET_TYPE_MASK | SOCK_NONBLOCK_ | SOCK_CLOEXEC_)) return _EINVAL;
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sv) < 0) return errno_map();
+    struct fd *fd = adhoc_fd_create(&socket_fdops);
+    if (fd == NULL) { close(sv[0]); close(sv[1]); return _ENOMEM; }
+    fd->stat.mode = S_IFSOCK | 0666;
+    fd->real_fd = sv[0];
+    fd->socket.domain = AF_NETLINK_;
+    fd->socket.type = type & SOCKET_TYPE_MASK;
+    fd->socket.protocol = protocol;
+    fd->socket.netlink_peer_fd = sv[1];
+    lock(&netlink_lock);
+    do { netlink_next_port++; } while (!netlink_next_port || netlink_port_used(netlink_next_port, NULL));
+    fd->socket.netlink_port = netlink_next_port;
+    list_add(&netlink_sockets, &fd->socket.netlink_link);
+    unlock(&netlink_lock);
+    // f_install closes fd (including both socketpair ends) on failure.
+    return f_install(fd, type & ~SOCKET_TYPE_MASK);
+}
+
 static lock_t peer_lock = LOCK_INITIALIZER;
 
 static fd_t sock_fd_create(int sock_fd, int domain, int type, int protocol) {
@@ -28,6 +229,7 @@ static fd_t sock_fd_create(int sock_fd, int domain, int type, int protocol) {
     fd->socket.domain = domain;
     fd->socket.type = type & SOCKET_TYPE_MASK;
     fd->socket.protocol = protocol;
+    fd->socket.netlink_peer_fd = -1;
     if (domain == AF_LOCAL_) {
         cond_init(&fd->socket.unix_got_peer);
         list_init(&fd->socket.unix_scm);
@@ -37,6 +239,8 @@ static fd_t sock_fd_create(int sock_fd, int domain, int type, int protocol) {
 
 int_t sys_socket(dword_t domain, dword_t type, dword_t protocol) {
     STRACE("socket(%d, %d, %d)", domain, type, protocol);
+    if (domain == AF_NETLINK_ && ish_netlink_stub_enabled())
+        return netlink_stub_socket(type, protocol);
     int real_domain = sock_family_to_real(domain);
     if (real_domain < 0)
         return _EAFNOSUPPORT;
@@ -339,6 +543,8 @@ int_t sys_bind(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len) {
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
         return _EBADF;
+    if (fd_is_netlink_stub(sock))
+        return netlink_bind(sock, sockaddr_addr, sockaddr_len);
     struct sockaddr_max_ sockaddr;
     int err = sockaddr_read_bind(sockaddr_addr, &sockaddr, &sockaddr_len, sock);
     if (err < 0)
@@ -526,6 +732,14 @@ int_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_ad
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
         return _EBADF;
+    if (fd_is_netlink_stub(sock)) {
+        uint32_t len;
+        if (user_get(sockaddr_len_addr, len)) return _EFAULT;
+        int err = netlink_name(sock, sockaddr_addr, len);
+        if (err < 0) return err;
+        len = sizeof(struct sockaddr_nl_);
+        return user_put(sockaddr_len_addr, len) ? _EFAULT : 0;
+    }
     dword_t sockaddr_len;
     if (user_get(sockaddr_len_addr, sockaddr_len))
         return _EFAULT;
@@ -640,6 +854,15 @@ int_t sys_sendto(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags, a
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
         return _EBADF;
+    if (fd_is_netlink_stub(sock)) {
+        if (flags & ~(MSG_DONTWAIT_ | 0x4000)) return _EOPNOTSUPP;
+        int err = netlink_destination(sockaddr_addr, sockaddr_len);
+        if (err < 0) return err;
+        if (len > NETLINK_BUFFER_SIZE) return _EMSGSIZE;
+        char req[NETLINK_BUFFER_SIZE];
+        if (len && user_read(buffer_addr, req, len)) return _EFAULT;
+        return netlink_stub_reply(sock, req, len);
+    }
     char *buffer = malloc((size_t) len + 1);
     if (buffer == NULL)
         return _ENOMEM;
@@ -762,6 +985,8 @@ int_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags,
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
         return _EBADF;
+    if (fd_is_netlink_stub(sock))
+        return netlink_recvfrom(sock, buffer_addr, len, flags, sockaddr_addr, sockaddr_len_addr);
     int real_flags = sock_flags_to_real(flags);
     if (real_flags < 0)
         return _EINVAL;
@@ -886,6 +1111,28 @@ int_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_a
     }
 
     int ret = 0;
+
+    // Tailscale's Linux netns path requests SO_BINDTODEVICE. Keep this
+    // compatibility opt-in with netlink; honour the binding rather than silently
+    // ignoring it. Darwin takes an interface index instead of a Linux name.
+    if (level == SOL_SOCKET_ && option == 25 && ish_netlink_stub_enabled()) {
+        if (value_len > IF_NAMESIZE) return _EINVAL;
+        char name[IF_NAMESIZE + 1] = {0};
+        memcpy(name, value, value_len);
+#ifdef __APPLE__
+        unsigned index = name[0] ? if_nametoindex(name) : 0;
+        if (name[0] && !index) return _ENODEV;
+        int result;
+        if (sock->socket.domain == AF_INET_)
+            result = setsockopt(sock->real_fd, IPPROTO_IP, IP_BOUND_IF, &index, sizeof(index));
+        else if (sock->socket.domain == AF_INET6_)
+            result = setsockopt(sock->real_fd, IPPROTO_IPV6, IPV6_BOUND_IF, &index, sizeof(index));
+        else return _EOPNOTSUPP;
+#else
+        int result = setsockopt(sock->real_fd, SOL_SOCKET, SO_BINDTODEVICE, name, strlen(name) + 1);
+#endif
+        return result < 0 ? errno_map() : 0;
+    }
 
     // ICMP6_FILTER can only be set on real SOCK_RAW
     if (level == IPPROTO_ICMPV6 && option == ICMP6_FILTER_)
@@ -1102,6 +1349,9 @@ int_t sys_sendmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags) {
     if (sock == NULL)
         return _EBADF;
 
+    if (fd_is_netlink_stub(sock))
+        return netlink_stub_sendmsg(sock, msghdr_addr, flags);
+
     // Read the guest msghdr struct into our internal 32-bit representation
     struct msghdr msg;
     struct msghdr_ msg_fake;
@@ -1316,6 +1566,9 @@ int_t sys_recvmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags) {
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
         return _EBADF;
+
+    if (fd_is_netlink_stub(sock))
+        return netlink_stub_recvmsg(sock, msghdr_addr, flags);
 
     // Read the guest msghdr struct into our internal 32-bit representation
     struct msghdr_ msg_fake;
@@ -1668,6 +1921,7 @@ static void sock_translate_err(struct fd *fd, int *err) {
 // except "host syscall got EINTR AND guest has a pending signal", which is
 // precisely the bug we need to fix.
 static ssize_t sock_read(struct fd *fd, void *buf, size_t size) {
+    if (fd_is_netlink_stub(fd)) return netlink_receive(fd, buf, size, 0);
     int err;
     int eintr_count = 0;
     for (;;) {
@@ -1695,6 +1949,7 @@ static ssize_t sock_read(struct fd *fd, void *buf, size_t size) {
 }
 
 static ssize_t sock_write(struct fd *fd, const void *buf, size_t size) {
+    if (fd_is_netlink_stub(fd)) return netlink_stub_reply(fd, buf, size);
     int err;
     int eintr_count = 0;
     for (;;) {
@@ -1718,6 +1973,13 @@ static ssize_t sock_write(struct fd *fd, const void *buf, size_t size) {
 }
 
 static int sock_close(struct fd *fd) {
+    if (fd_is_netlink_stub(fd)) {
+        lock(&netlink_lock);
+        list_remove(&fd->socket.netlink_link);
+        unlock(&netlink_lock);
+        close(fd->socket.netlink_peer_fd);
+    }
+
     sockrestart_end_listen(fd);
     // FIXME next 3 lines should go in a function like release_unix_names
     inode_release_if_exist(fd->socket.unix_name_inode);

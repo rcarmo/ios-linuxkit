@@ -96,6 +96,8 @@ Some host differences remain at their call sites:
 
 - native offload in `kernel/native_offload.c` has platform-specific execution paths;
 - sockets and polling map Linux guest behaviour to different host facilities;
+  opt-in [route-netlink snapshots](NETLINK_TAILSCALE.md) report host interfaces
+  without supporting guest route changes or network-change notifications;
 - synchronisation uses host-specific timed-wait and lock operations.
 
 ## Guest compatibility settings
