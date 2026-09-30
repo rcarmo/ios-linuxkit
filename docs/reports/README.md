@@ -24,4 +24,6 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [OpenMinis memory/AOT follow-up](audits/OPENMINIS_MEMORY_FOLLOWUP_2026-09-30.md) compares the footprint governor and host-page clustering against our allocation ledger and defines the next host/device gates; it does not import those changes.
 
+[Real-code clustering span probe — 30 September 2026](audits/REAL_CLUSTER_SPAN_PROBE_2026-09-30.md) records actual upstream allocation/ownership tests under synthetic 4/16 KiB spans and release/debug data-object failure leaks; it is not Apple validation or a clustering import.
+
 Use the guides in the parent directory for current build, validation and release boundaries. When citing a report, include its date, source revision, host and rootfs if the report supplies them.
