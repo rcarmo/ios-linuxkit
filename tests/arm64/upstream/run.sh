@@ -48,6 +48,16 @@ lifecycle_marker() {
     "${libs[@]}" -o "$TMP/anon-accounting"
 check "$TMP/anon-accounting.log" 'anon-accounting-actual-kernel-ok' "$TMP/anon-accounting"
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/cow-failure.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 \
+    "${libs[@]}" -o "$TMP/cow-failure"
+check "$TMP/cow-mmap.log" 'cow-allocation-failure-ok' "$TMP/cow-failure" mmap
+check "$TMP/cow-data.log" 'cow-allocation-failure-ok' "$TMP/cow-failure" data
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/signal-pressure.c" -Wl,--wrap=do_exit_group \
+    "${libs[@]}" -o "$TMP/signal-pressure"
+check "$TMP/signal-refuse.log" 'signal-pressure-refusal-ok' "$TMP/signal-pressure" refuse
+check "$TMP/signal-recover.log" 'signal-pressure-recovery-ok' "$TMP/signal-pressure" recover
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/offload-exec.c" -Wl,--wrap=native_offload_lookup_exec -Wl,--wrap=native_offload_exec \
     "${libs[@]}" -o "$TMP/offload-exec"
 mkdir -p "$TMP/offload-root/bin" "$TMP/offload-root/usr/bin" "$TMP/offload-root/tmp"

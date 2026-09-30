@@ -586,8 +586,14 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
 
     // install frame
     if (user_write(sp, &frame, frame_size)) {
-        printk("failed to install frame for %d at %#x\n", info->sig, sp);
-        deliver_signal(current, SIGSEGV_, SIGINFO_NIL);
+        printk("failed to install frame for %d at %#llx\n", info->sig,
+                (unsigned long long) sp);
+        // receive_signals holds sighand->lock. Re-queuing via deliver_signal
+        // would recursively lock it, and retrying a SIGSEGV handler on the
+        // same unavailable stack cannot make progress. Fail the guest, not
+        // the host, when stack/CoW admission or copying the frame fails.
+        unlock(&sighand->lock);
+        do_exit_group(SIGSEGV_);
     }
 
 #if defined(GUEST_ARM64)

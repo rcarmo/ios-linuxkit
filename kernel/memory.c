@@ -24,6 +24,7 @@ static void mem_changed(struct mem *mem);
 static struct mmu_ops mem_mmu_ops;
 
 #include "kernel/mm.h"
+#include "kernel/memory_policy.h"
 
 static void reacquire_read_after_failed_jit_upgrade(wrlock_t *lock) {
     // glibc rwlocks are writer-preferred in util/sync.h. If a JIT thread
@@ -608,19 +609,16 @@ int pt_map_nothing(struct mem *mem, page_t start, pages_t pages, unsigned flags)
     if (!(flags & P_READ) && !(flags & P_WRITE) && !(flags & P_EXEC))
         host_prot = PROT_NONE;
     size_t map_size = (size_t)pages * PAGE_SIZE;
-#if ANON_MMAP_LIMIT_PAGES > 0
+    struct ish_memory_ticket ticket = {0};
     bool charged = anon_page_is_charged(flags | P_ANONYMOUS);
-    if (charged && !anon_pages_reserve((long)pages))
+    if (charged && !anon_pages_reserve_ticket((long)pages, &ticket))
         return _ENOMEM;
-#endif
     void *memory = mmap(NULL, map_size, host_prot, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
     int err = memory == MAP_FAILED ? _ENOMEM :
         pt_map_accounted(mem, start, pages, memory, 0, flags | P_ANONYMOUS, true);
-#if ANON_MMAP_LIMIT_PAGES > 0
-    // Explicit ownership transfer; no thread-local credit or transient double charge.
-    if (err < 0 && charged)
-        anon_pages_unreserve((long)pages);
-#endif
+    // Refund both logical and sampled-budget admission on failure. Successful
+    // host allocation debt remains until a later capture/measurement settles it.
+    if (charged) anon_pages_finish_ticket(&ticket, err >= 0);
     if (err < 0 && memory != MAP_FAILED)
         munmap(memory, map_size);
     return err;
@@ -644,6 +642,9 @@ int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
             continue;
         int old_flags = entry->flags;
         unsigned new_flags = flags | (old_flags & P_META_FLAGS);
+        int delta = (int)anon_page_is_charged(new_flags) - (int)anon_page_is_charged(old_flags);
+        struct ish_memory_ticket ticket = {0};
+        if (delta > 0 && !anon_pages_reserve_ticket(delta, &ticket)) return _ENOMEM;
 
         // check if protection is increasing
         if ((flags & ~old_flags) & (P_READ|P_WRITE)) {
@@ -652,14 +653,20 @@ int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
             data = (void *) ((uintptr_t) data & ~(real_page_size - 1));
             int prot = PROT_READ;
             if (flags & P_WRITE) prot |= PROT_WRITE;
-            if (mprotect(data, real_page_size, prot) < 0)
-                return errno_map();
+            if (mprotect(data, real_page_size, prot) < 0) {
+                int error = errno_map();
+                if (ticket.active) anon_pages_finish_ticket(&ticket, false);
+                return error;
+            }
         }
         entry->flags = new_flags;
+        if (ticket.active) anon_pages_finish_ticket(&ticket, true);
 #if ANON_MMAP_LIMIT_PAGES > 0
-        int delta = (int)anon_page_is_charged(new_flags) - (int)anon_page_is_charged(old_flags);
-        atomic_fetch_add(&anon_page_count, delta);
+        if (delta < 0) atomic_fetch_add(&anon_page_count, delta);
 #endif
+        // A later page may fail admission/mprotect. Publish earlier changes
+        // even on partial failure so other threads cannot retain stale TLBs.
+        mem_changed(mem);
     }
     int err = mem_set_reservation_flags(mem, start, pages, flags);
     if (err < 0)
@@ -830,23 +837,26 @@ have_entry:
         // if page is unwritable, well tough luck
         if (type != MEM_WRITE_PTRACE && !(entry->flags & P_WRITE))
             return NULL;
-        if (type == MEM_WRITE_PTRACE) {
-            // TODO: Is P_WRITE really correct? The page shouldn't be writable without ptrace.
-#if ANON_MMAP_LIMIT_PAGES > 0
-            bool was_charged = anon_page_is_charged(entry->flags);
-#endif
-            entry->flags |= P_WRITE | P_COW;
-#if ANON_MMAP_LIMIT_PAGES > 0
-            if (!was_charged && anon_page_is_charged(entry->flags))
-                atomic_fetch_add(&anon_page_count, 1);
-#endif
-        }
+        // Ptrace protection changes are installed only after backing allocation
+        // succeeds; refusing admission must not leave writable/charged flags.
         // get rid of any compiled blocks in this page
         asbestos_invalidate_page(mem->mmu.asbestos, page);
         // if page is cow, ~~milk~~ copy it
-        if (entry->flags & P_COW) {
+        if ((entry->flags & P_COW) || type == MEM_WRITE_PTRACE) {
+            // CoW allocates new backing but replaces, rather than adds, a
+            // logical mapping. Track span admission independently of that ledger.
+            struct ish_memory_ticket ticket = {0};
+            unsigned target_flags = entry->flags & ~P_COW;
+            if (type == MEM_WRITE_PTRACE) target_flags |= P_WRITE;
+            long logical_delta = (int)anon_page_is_charged(target_flags) -
+                (int)anon_page_is_charged(entry->flags);
+            if (!ish_memory_reserve_ticket(logical_delta, PAGE_SIZE, &ticket)) return NULL;
             void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+            if (copy == MAP_FAILED) {
+                anon_pages_finish_ticket(&ticket, false);
+                return NULL;
+            }
 
 #ifndef NDEBUG
             remapped = true;
@@ -856,16 +866,27 @@ have_entry:
             // Re-fetch entry after lock upgrade — another thread may have
             // already resolved this CoW while we were waiting for the lock.
             entry = mem_pt(mem, page);
-            if (entry != NULL && (entry->flags & P_COW)) {
+            bool installed = false;
+            if (entry != NULL) {
+                target_flags = entry->flags & ~P_COW;
+                if (type == MEM_WRITE_PTRACE) target_flags |= P_WRITE;
+            }
+            if (entry != NULL && ((entry->flags & P_COW) || type == MEM_WRITE_PTRACE) &&
+                    logical_delta == (int)anon_page_is_charged(target_flags) -
+                                     (int)anon_page_is_charged(entry->flags)) {
                 void *data = (char *) entry->data->data + entry->offset;
                 memcpy(copy, data, PAGE_SIZE);
-                pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
-                mem_changed(mem);
-            } else {
-                munmap(copy, PAGE_SIZE);
+                target_flags = entry->flags & ~P_COW;
+                if (type == MEM_WRITE_PTRACE) target_flags |= P_WRITE;
+                installed = pt_map_accounted(mem, page, 1, copy, 0, target_flags,
+                    logical_delta > 0) == 0;
+                if (installed) mem_changed(mem);
             }
+            if (!installed) munmap(copy, PAGE_SIZE);
+            anon_pages_finish_ticket(&ticket, installed);
             write_wrunlock(&mem->lock);
             read_wrlock(&mem->lock);
+            if (!installed) return NULL;
         }
     }
 

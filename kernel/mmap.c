@@ -10,25 +10,48 @@
 #include "kernel/memory_policy.h"
 #include "util/timer.h"
 
-// Separate from mapping ownership/accounting. This short lock makes sampler
-// fields and hysteresis one coherent state; no platform callback runs under it.
+// Sample state and outstanding transactions share one lock. Capture is taken
+// before a host measurement, so later completions cannot be settled by it.
 static lock_t memory_policy_lock = LOCK_INITIALIZER;
 static bool memory_policy_enabled, memory_policy_valid, memory_policy_braked;
 static struct ish_memory_sample memory_policy_sample;
+static uint64_t memory_policy_issued, memory_policy_accepted;
+static uint64_t memory_policy_pending, memory_policy_completed, memory_policy_settled;
+static uint64_t memory_policy_transactions;
 
-void ish_memory_policy_enable(bool enabled) {
+bool ish_memory_policy_enable(bool enabled) {
     lock(&memory_policy_lock);
-    memory_policy_enabled = enabled;
-    memory_policy_valid = false;
-    memory_policy_braked = enabled;
-    memory_policy_sample = (struct ish_memory_sample) {0};
+    bool ok = memory_policy_transactions == 0;
+    if (ok) {
+        memory_policy_enabled = enabled;
+        memory_policy_valid = false;
+        memory_policy_braked = enabled;
+        memory_policy_sample = (struct ish_memory_sample) {0};
+        memory_policy_settled = memory_policy_completed;
+        memory_policy_accepted = memory_policy_issued;
+    }
     unlock(&memory_policy_lock);
+    return ok;
+}
+
+struct ish_memory_capture ish_memory_policy_capture(void) {
+    lock(&memory_policy_lock);
+    struct ish_memory_capture capture = {++memory_policy_issued, memory_policy_completed};
+    unlock(&memory_policy_lock);
+    return capture;
 }
 
 bool ish_memory_policy_update(struct ish_memory_sample sample) {
     lock(&memory_policy_lock);
+    struct timespec clock = timespec_now(CLOCK_MONOTONIC);
+    uint64_t now = (uint64_t) clock.tv_sec * 1000 + clock.tv_nsec / 1000000;
     bool valid = memory_policy_enabled && sample.allowance_bytes &&
         sample.available_bytes <= sample.allowance_bytes && sample.monotonic_ms &&
+        sample.monotonic_ms <= now &&
+        sample.capture.generation > memory_policy_accepted &&
+        sample.capture.generation <= memory_policy_issued &&
+        sample.capture.completed_bytes >= memory_policy_settled &&
+        sample.capture.completed_bytes <= memory_policy_completed &&
         (!memory_policy_valid || sample.monotonic_ms >= memory_policy_sample.monotonic_ms);
     if (valid) {
         uint64_t threshold = memory_policy_braked ?
@@ -36,6 +59,8 @@ bool ish_memory_policy_update(struct ish_memory_sample sample) {
             sample.allowance_bytes / 10;
         memory_policy_braked = sample.critical || sample.available_bytes < threshold;
         memory_policy_sample = sample;
+        memory_policy_settled = sample.capture.completed_bytes;
+        memory_policy_accepted = sample.capture.generation;
         memory_policy_valid = true;
     }
     unlock(&memory_policy_lock);
@@ -51,33 +76,84 @@ bool ish_memory_policy_snapshot(struct ish_memory_sample *sample, bool *braked) 
     return enabled;
 }
 
-static bool memory_policy_admit(long pages) {
-    if (pages < 0) return false;
-    if (pages == 0) return true;
+struct ish_memory_budget ish_memory_policy_budget(void) {
     lock(&memory_policy_lock);
-    bool ok = true;
-    if (memory_policy_enabled) {
+    struct ish_memory_budget budget = {memory_policy_pending,
+        memory_policy_completed - memory_policy_settled};
+    unlock(&memory_policy_lock);
+    return budget;
+}
+
+#if ANON_MMAP_LIMIT_PAGES > 0
+_Atomic long anon_page_count;
+#endif
+
+bool ish_memory_reserve_ticket(long pages, uint64_t bytes, struct ish_memory_ticket *ticket) {
+    if (ticket->active || pages < 0) return false;
+    size_t span = real_page_size;
+    if (!span || bytes > UINT64_MAX - (span - 1)) return false;
+    bytes = (bytes + span - 1) / span * span;
+    lock(&memory_policy_lock);
+    bool ok = memory_policy_transactions < UINT64_MAX &&
+        memory_policy_pending <= UINT64_MAX - bytes &&
+        memory_policy_completed <= UINT64_MAX - memory_policy_pending - bytes;
+    if (ok && bytes && memory_policy_enabled) {
         struct timespec clock = timespec_now(CLOCK_MONOTONIC);
         uint64_t now = (uint64_t) clock.tv_sec * 1000 + clock.tv_nsec / 1000000;
+        uint64_t unsettled = memory_policy_completed - memory_policy_settled;
+        uint64_t available = memory_policy_sample.available_bytes;
         ok = memory_policy_valid && !memory_policy_braked &&
             now >= memory_policy_sample.monotonic_ms &&
             now - memory_policy_sample.monotonic_ms <= 2000 &&
-            (uint64_t) pages <= memory_policy_sample.available_bytes / PAGE_SIZE;
+            unsettled <= available && memory_policy_pending <= available - unsettled &&
+            bytes <= available - unsettled - memory_policy_pending;
+    }
+#if ANON_MMAP_LIMIT_PAGES > 0
+    if (ok && pages) {
+        long count = atomic_load(&anon_page_count);
+        do {
+            if (count < 0 || pages > ANON_MMAP_LIMIT_PAGES ||
+                    count > ANON_MMAP_LIMIT_PAGES - pages) {
+                ok = false;
+                break;
+            }
+        } while (!atomic_compare_exchange_weak(&anon_page_count, &count, count + pages));
+    }
+#endif
+    if (ok) {
+        memory_policy_transactions++;
+        memory_policy_pending += bytes;
+        *ticket = (struct ish_memory_ticket) {bytes, pages, true};
     }
     unlock(&memory_policy_lock);
     return ok;
 }
 
-#if ANON_MMAP_LIMIT_PAGES > 0
-_Atomic long anon_page_count;
+bool anon_pages_reserve_ticket(long pages, struct ish_memory_ticket *ticket) {
+    if (pages < 0 || (uint64_t) pages > UINT64_MAX / PAGE_SIZE) return false;
+    return ish_memory_reserve_ticket(pages, (uint64_t) pages * PAGE_SIZE, ticket);
+}
 
+void anon_pages_finish_ticket(struct ish_memory_ticket *ticket, bool committed) {
+    lock(&memory_policy_lock);
+    assert(ticket->active && memory_policy_transactions && memory_policy_pending >= ticket->bytes);
+    memory_policy_transactions--;
+    memory_policy_pending -= ticket->bytes;
+    if (committed) memory_policy_completed += ticket->bytes;
+#if ANON_MMAP_LIMIT_PAGES > 0
+    else atomic_fetch_sub(&anon_page_count, ticket->pages);
+#endif
+    *ticket = (struct ish_memory_ticket) {0};
+    unlock(&memory_policy_lock);
+}
+
+#if ANON_MMAP_LIMIT_PAGES > 0
+// Compatibility for direct accounting probes. Physical allocation paths must
+// keep the explicit ticket outstanding until their map succeeds or fails.
 bool anon_pages_reserve(long pages) {
-    if (!memory_policy_admit(pages)) return false;
-    long count = atomic_load(&anon_page_count);
-    do {
-        if (pages > ANON_MMAP_LIMIT_PAGES || count > ANON_MMAP_LIMIT_PAGES - pages)
-            return false;
-    } while (!atomic_compare_exchange_weak(&anon_page_count, &count, count + pages));
+    struct ish_memory_ticket ticket = {0};
+    if (!anon_pages_reserve_ticket(pages, &ticket)) return false;
+    anon_pages_finish_ticket(&ticket, true);
     return true;
 }
 
