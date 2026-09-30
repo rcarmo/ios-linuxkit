@@ -29,10 +29,13 @@ test('invalid and empty recordings fail closed without an image',async()=>{
  }
 });
 test('targeted recorder propagates failures and never publishes a manifest',async()=>{
- const ish=join(dir,'failing-ish');await Bun.write(ish,'#!/bin/sh\necho workload-failed >&2\nexit 37\n');
+ const ish=join(dir,'failing-ish');await Bun.write(ish,'#!/bin/sh\nprintf "%s\\n" "$@"\necho workload-failed >&2\nexit 37\n');
  Bun.spawnSync(['chmod','+x',ish]);const out=join(dir,'failed');
  const r=Bun.spawnSync(['bun',join(root,'tools/jit_aot/targeted.ts'),ish,dir,out],{stdout:'pipe',stderr:'pipe'});
  expect(r.exitCode).not.toBe(0);expect(r.stderr.toString()).toContain('exit 37');
  expect(await Bun.file(join(out,'manifest.json')).exists()).toBe(false);
- expect(readFileSync(join(out,'inventory.log'),'utf8')).toContain('workload-failed');
+ const inventory=readFileSync(join(out,'inventory.log'),'utf8');
+ expect(inventory).toContain('workload-failed');
+ expect(inventory).toContain('apk list --installed musl busybox python3 zlib');
+ expect(inventory).not.toContain('apk info -v');
 });

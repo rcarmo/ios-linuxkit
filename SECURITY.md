@@ -10,10 +10,13 @@ Host integrations widen guest access:
 - native offload handlers receive guest-controlled arguments and execute as host code;
 - spawned native mappings execute host programs outside instruction emulation.
 
-Validate paths, arguments and data at each integration boundary.
+Validate paths, arguments and data at each integration boundary. AOT artifact
+manifests detect file changes but provide no signature or archive sandbox. Use
+trusted archives, verify separately supplied checksums and run native import/build
+tools with normal user privileges.
 
 Report ordinary crashes, illegal instructions, syscall defects and compatibility failures through the repository's [GitHub issues](https://github.com/rcarmo/ios-linuxkit/issues). Include the source revision, host or iOS version, rootfs, reproduction command, exit status and relevant diagnostics.
 
 This fork does not currently enable GitHub private vulnerability reporting. For a report that cannot safely be public, email [rui@carmo.io](mailto:rui@carmo.io) and request a private channel. Do not attach exploit details, credentials or private user data to a public issue.
 
-The upstream iSH policy and contact details apply to upstream iSH releases, not automatically to this fork.
+Use the contact above for this fork. Upstream iSH maintains its own policy and contacts.

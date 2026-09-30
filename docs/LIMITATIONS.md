@@ -4,7 +4,7 @@
 
 ## Security boundary
 
-The runtime assumes one user inside an outer iOS sandbox. Guest permissions, memory safety and thread safety are compatibility mechanisms, not a hardened container boundary. A guest process can exercise a large C/assembly codebase and any host integration exposed by the app.
+The runtime assumes one user inside an outer iOS sandbox. Guest permissions, memory safety and thread safety do not confine hostile code. A guest process can exercise a large C/assembly codebase and any host integration exposed by the app.
 
 Do not use it to confine hostile workloads. Read [SECURITY.md](../SECURITY.md) for vulnerability reporting and the inherited security model.
 
@@ -34,7 +34,7 @@ The runtime implements Linux interfaces in user space. The following classes are
 - every modern syscall, socket option, `procfs` field and filesystem edge case;
 - GUI stacks such as X11 or Wayland in the supplied app.
 
-Optional probes may receive `ENOSYS` and fall back. A quiet fallback is not an implementation of that facility.
+Optional probes may receive `ENOSYS` and fall back. Fallback paths can let a program continue without that facility.
 
 ## Runtime compatibility settings
 
@@ -75,7 +75,7 @@ Run the exact iOS archive on a physical device before distribution.
 
 ## Rootfs and package state
 
-Most language and CLI results depend on the packaged distribution, repositories and installed versions. Test scripts can install or update packages in place. A missing class, command or shared library may be a rootfs packaging defect rather than an emulator defect, but it still makes that workload fail.
+Most language and CLI results depend on the packaged distribution, repositories and installed versions. Test scripts can install or update packages in place. A missing class, command or shared library fails the workload. Check package contents before investigating the emulator.
 
 Dated reports under `docs/reports/` record their original rootfs and tool versions where known. They should not be presented as the result of the current package set without rerunning the command.
 
@@ -85,6 +85,20 @@ Historical x86-versus-ARM64 measurements are retained under [`reports/benchmarks
 
 Executor statistics are diagnostic counters. They do not establish user-visible speed without elapsed-time and workload measurements. The [September load-dispatch pass](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) measured modest Linux compute gains against 2.1.2; shell startup remained noisy. Do not add percentages from separate optimisation passes or extrapolate them to iOS.
 
+## AOT constraints
+
+AOT images require compatible emulator layouts and matching guest modules.
+Package changes can reduce image use; old ABI images are rejected. Code without
+a usable translation runs through gadgets. The image tables and native text
+increase binary size and memory use. The [29 September prototype](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md)
+measured about 12–13% improvement in shell/zlib workloads and a 15% Python
+slowdown, with Python peak RSS rising from 18.3MiB to 54.1MiB.
+
+Linux recordings contain native words and baked offsets. Apple reuse requires
+target ABI/symbol checks, app recovery/build integration and physical-device
+validation. Existing Xcode schemes use gadgets. [Apple implementation steps](NATIVE_AOT_IOS.md)
+list the checks needed before distribution.
+
 ## Release tooling
 
-The checked-in Fastlane configuration names upstream iSH targets and repositories. It is not a release path for the ARM64 schemes in this fork. A production handoff needs reviewed bundle identifiers, signing profiles, TestFlight groups, repository targets and changelog handling.
+The checked-in Fastlane configuration uploads upstream iSH targets and repositories. Before using it for this fork, change and review its ARM64 schemes, bundle identifiers, signing profiles, TestFlight groups, repository targets and changelog handling.

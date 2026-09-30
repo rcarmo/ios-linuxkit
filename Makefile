@@ -54,9 +54,15 @@ help:
 	@echo ""
 	@echo "Knobs: ROOTFS_DIR=$(ROOTFS_DIR) DEBIAN_ROOTFS_DIR=$(DEBIAN_ROOTFS_DIR) ROOTFS_LANES=$(ROOTFS_LANES) CLI_PACKAGE_MANAGERS=$(CLI_PACKAGE_MANAGERS) REPORT_DIR=$(REPORT_DIR) TIMEOUT_S=$(TIMEOUT_S) INSTALL_TIMEOUT_S=$(INSTALL_TIMEOUT_S) PERF_RUNS=$(PERF_RUNS) PERF_CPU=$(PERF_CPU)"
 
-.PHONY: check-docs
+.PHONY: check-docs check-docs-style test-docs-style
 check-docs:
 	bun scripts/check-markdown-links.ts
+
+check-docs-style:
+	bun scripts/check-docs-style.ts
+
+test-docs-style:
+	bun test scripts/check-docs-style.test.ts
 
 .PHONY: test-rootfs-download
 test-rootfs-download:

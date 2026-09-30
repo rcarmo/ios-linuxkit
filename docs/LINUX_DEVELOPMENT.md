@@ -16,7 +16,7 @@ The Linux command-line build requires an AArch64 host because its gadget files c
 | September validation kernel | `6.6.89-cix` (AArch64) |
 | Workspace storage | NVMe, ext4 |
 
-The board details identify the measured host; they are not minimum requirements. The `test-arm64-fcvt-vector` gate also uses the host CPU as an AArch64 floating-point oracle.
+These specifications identify the test host. Smaller hosts have not been benchmarked. The `test-arm64-fcvt-vector` gate also uses the host CPU as an AArch64 floating-point oracle.
 
 ## Dependencies
 
@@ -61,8 +61,8 @@ The repository uses submodules under `deps/`. A source archive without those rev
 The Makefile wraps the supported Meson commands:
 
 ```sh
-make build-arm64-linux
-make build-arm64-linux-debug
+CC=clang make build-arm64-linux
+CC=clang make build-arm64-linux-debug
 ```
 
 Build both variants with:
@@ -118,7 +118,7 @@ The program after these options is the initial guest process. There is no separa
 
 ## Create and run a fakefs
 
-The rootfs URL and architecture are defined in `app/GuestARM64.xcconfig`. At the time of this rewrite they name Alpine 3.24.0 for AArch64:
+The rootfs URL and architecture are defined in `app/GuestARM64.xcconfig`. The current pin is Alpine 3.24.2 for AArch64:
 
 ```sh
 curl -fLO https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.2-aarch64.tar.gz
@@ -131,13 +131,18 @@ echo '9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773  alpine-m
 
 The generated fakefs directory is ignored by Git. Keep an untouched copy if tests are allowed to install packages.
 
-Export a fakefs by invoking the same binary through its `unfakefsify` symlink:
+Stop all guests using the fakefs before exporting it through `unfakefsify`:
 
 ```sh
 ./build-arm64-linux/tools/unfakefsify \
   alpine-arm64-fakefs \
   rootfs-export.tar.gz
 ```
+
+For a raw snapshot, keep `data/`, `meta.db` and any SQLite WAL/shared-memory files
+together. Portable exports restore guest permissions and symlinks through
+`fakefsify`, assigning new host inode numbers. The [artifact procedure](NATIVE_AOT_ARTIFACT_KIT.md)
+checks a quiescent source and exports a private clone.
 
 ## Bind host paths
 

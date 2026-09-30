@@ -52,20 +52,17 @@ The default `ROOTFS_LANES` includes both Alpine and Debian. Override it when onl
 
 Cold Go caches can exceed the ordinary timeout because Alpine may ship standard-library source without precompiled archives. Increase `TIMEOUT_S` for a cold toolchain instead of classifying a harness kill as a pass.
 
-## CLI crash recovery (2026-09-29)
+## CLI and native fault recovery
 
-`make test-arm64-upstream` also invokes the real CLI crash handler with synthetic
-host contexts: eight SIGSEGV/SIGBUS, read/write and precise/fallback-PC cases
-verify its exact frame-write footprint and SP/trampoline handoff. The unchanged
-baseline overwrites three padding bytes beside the write-fault boolean; the fix
-stores one byte. C/assembly recovery offsets are compile-time checked, with an
-explicit generated-header dependency. This does not certify live host signal
-recovery or explain the earlier unattributed exit 139.
+`test-arm64-upstream` calls the real CLI handler with eight synthetic
+SIGSEGV/SIGBUS contexts to check read/write fields, precise/fallback PC and
+SP/trampoline handoff. The [2.2.2 record](reports/releases/IOS_LINUXKIT_2.2.2.md)
+contains the original wrong-width store regression.
 
-Fresh release/debug builds pass the seven focused gates and 14/14 continuation
-fixtures each. Native-JIT/AOT emitter probes and adoption blockers are documented
-in [the dated investigation](reports/audits/JIT_AOT_INVESTIGATION_2026-09-29.md).
-The experimental backend remains disabled and is not imported.
+`test-arm64-native-emitter` uses actual Linux faults to check exact native
+restart at O0/O2, prefix side effects, register/memory results and ABI rejection.
+Both checks apply to the CLI. Apple app fault recovery needs the implementation
+and device tests in [iOS AOT](NATIVE_AOT_IOS.md).
 
 ## Runtime coverage stages
 
@@ -99,14 +96,14 @@ tests/arm64/upstream/
 
 They contain fixtures for CAS pairs, exclusive monitor clearing, exclusive widths, pair exclusives, AdvSIMD floating-point conversions, `LDPSW`, precise LDR fault/retry PCs, procfs and full-width file seek semantics, CPU poke delivery and per-thread alternate signal stacks. Presence of a fixture is not a passing result; see the current exclusions below. New low-level work should add a similarly small fixture and include it in a repeatable script or runtime row.
 
-The load-PC gate requires a prepared Debian fakefs and a native AArch64 Linux host with 4 KiB pages. Run the debug variant directly:
+The load-PC gate requires a prepared fakefs and a native AArch64 Linux host with 4 KiB pages. Run the debug variant directly:
 
 ```sh
 CC=clang ISH_BIN="$PWD/build-arm64-linux-debug/ish" \
   tests/arm64/loadstore/run-load64-fault-pc.sh
 ```
 
-The fixture unmaps both isolated pages before each fault. Its cross-page case checks a first-page fault and successful split access after remapping, not a second-page-only fault or `PROT_NONE` enforcement. A wrong-saved-PC negative mutation must fail; the September pass recorded exit 40, restored the source, rebuilt and confirmed a pass.
+The fixture unmaps both isolated pages before each fault. Its cross-page case checks a first-page fault and successful split access after remapping. Second-page-only faults and `PROT_NONE` enforcement are outside the fixture. A wrong-saved-PC negative mutation must fail; the September pass recorded exit 40, restored the source, rebuilt and confirmed a pass.
 
 A focused fixture should test architectural edge cases relevant to the instruction:
 
@@ -126,13 +123,13 @@ A row fails when any of these occur:
 3. `SAFETY-VALVE` appears in a non-diagnostic row;
 4. unexpected fault, illegal-instruction or `NETDIAG` output appears;
 5. a required row is skipped or silently reported as success;
-6. the expected output came from stale artefacts rather than the binary built for the run.
+6. the expected output came from stale artifacts.
 
 Unsupported facilities must be reported as unsupported with a reason. Package absence and rootfs packaging errors are not emulator passes; record them separately from instruction or syscall results.
 
 ## Diagnostics during tests
 
-`ISH_ARM64_BLOCK_STATS=1` and `ISH_ARM64_FUSION_STATS=1` intentionally add output. Use them for performance investigations, not exact-output correctness gates. Fault and PC tracing can also perturb timing and produce large logs.
+`ISH_ARM64_BLOCK_STATS=1` and `ISH_ARM64_FUSION_STATS=1` intentionally add output. Use them for performance investigations. Disable them in exact-output correctness gates. Fault and PC tracing can also perturb timing and produce large logs.
 
 When a broad row fails, rerun its exact guest command with a bounded timeout. Preserve:
 
@@ -142,41 +139,28 @@ When a broad row fails, rerun its exact guest command with a bounded timeout. Pr
 - complete command and environment;
 - exit status and diagnostic excerpt.
 
-## Current evidence
+## Dated evidence and known exclusions
 
-[`reports/audits/OPENMINIS_AUDIT_2026-07-20.md`](reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records the July audit and subsequent follow-ups:
+| Record | Results and scope |
+|---|---|
+| [July OpenMinis audit](reports/audits/OPENMINIS_AUDIT_2026-07-20.md) | ARM64 instruction/syscall review and native/release/debug fixtures; broad Alpine runs reached 82/83 because Clojure lacked `clojure.main`. |
+| [September imports](reports/audits/OPENMINIS_IMPORT_2026-09-28.md) | 55 upstream commit dispositions, failure/lifetime tests and filesystem timings. |
+| [Procfs stress](reports/audits/PROCFS_EXIT_STRESS_2026-09-28.md) | Shell-harness defects, numeric PID lookup and captured lock cycle. |
+| [Alpine integration](reports/audits/AOT_ALPINE_INTEGRATION_2026-09-29.md) | Regular-file readiness, exit TLS handoff and a separate proc-stat/signal lock cycle. |
+| [AOT host integration](reports/audits/AOT_ALPINE_HOST_2026-09-29.md) | Four linked images, exact restart, native oracles and release/debug stress. |
+| [Reusable artifacts](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md) | Restored guest identity, no-retraining rebuild, execution PCs, timings/RSS and Apple handoff limits. |
 
-- at `35dac743`, Clang release and debug builds, all 47 C/ARM64 rows, and focused atomic, timer, epoll, `madvise`, signal and pidfd regressions passed; two broad release runs reached 82/83 because the tested Clojure package lacked `clojure.main`;
-- at `40f1bf40`, clean Clang release and debug builds and `test-arm64-fcvt-vector` passed for `FCVTN`, `FCVTN2`, `FCVTL`, `FCVTL2`, `FCVTXN` and `FCVTXN2`;
-- the 2.1.1 follow-up preserves a byte-identical static `/proc/self/mem` fixture: `v2.1.0` crashes the host process at PC `0x0`, while the fixed release and debug binaries pass the native seek matrix.
+Earlier broad-suite failures include Debian package detection selecting
+Alpine's `build-base`, a glibc alternate-stack fixture exiting during
+`pthread_create` after `clone3` returned EINVAL, and native SIGBUS in the
+`ldxp-stlxp.c` fixture with the recorded compiler flags. Those runs supplied
+no guest coverage for the failed stages. Rerun their exact fixtures before
+changing their status; focused passes do not close them.
 
-The [5 September seek investigation](reports/audits/ARM_LINUX_LSEEK_2026-09-05.md) records `a5d571f2`: a guest Python sparse-file failure reduced to a raw-syscall boundary fixture, with before/after release and debug results. The [CPU poke benchmark](reports/benchmarks/ARM_LINUX_POKE_2026-09-05.md) records the candidate committed as `e1417b6e`: 30 controlled compute pairs, 1.5–2.2% median improvement across two series, no demonstrated startup/I/O benefit, and acknowledged-signal stress coverage. [Source release 2.1.2](reports/releases/IOS_LINUXKIT_2.1.2.md) records its release gates.
-
-The [load-dispatch investigation](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) records the second pass against 2.1.2: 2.65% and 1.86% compute median reductions, 23/30 faster pairs, and a rejected non-repeatable TLB candidate. Native/baseline/release/debug exact-PC fixtures passed; no iOS speedup is inferred. [Source release 2.1.3](reports/releases/IOS_LINUXKIT_2.1.3.md) records fresh release/debug builds, all five focused gates and four additional native-oracle fixture comparisons per build.
-
-The [September OpenMinis import](reports/audits/OPENMINIS_IMPORT_2026-09-28.md)
-records the complete 55-commit disposition, actual-allocation failure tests,
-negative anonymous-ledger reproducer, bounded lifetime gates and measured
-filesystem result. Both builds pass the expanded upstream gate and the five
-preservation gates. Set `EVIDENCE_DIR` to retain the upstream runner's artifacts.
-Minimal rootfs lanes can run internal-continuation fixtures with
-`HOST_CC=clang make ROOTFS_DIR="$PWD/debian-arm64-fakefs" test-arm64-internal-continue-fixtures`
-on native AArch64; this compiles the same static fixture on the host, not in the
-guest. The [procfs stress follow-up](reports/audits/PROCFS_EXIT_STRESS_2026-09-28.md)
-identifies the dash shutdown defect, hidden missing ps, expensive numeric lookup
-and a captured inode/PID/memory lock cycle. The corrected full-load gate passes
-release/debug with real ps and per-worker progress. An intermediate exit-139
-observation remains unattributed; these passes do not certify every lifetime
-race. Darwin/iOS and ASan runtime validation remain unestablished.
-
-Two pre-existing failures from the earlier run remain open:
-
-- Debian package bootstrap: `detect_platform()` retains a blank line after removing the status marker and selects Alpine's `build-base`; the broad suite stops after four base rows, before C coverage.
-- The glibc per-thread alternate-stack fixture exits during `pthread_create` because `clone3` returns `EINVAL`; native execution passes. Guest alternate-stack behaviour is not exercised by that failed run.
-
-The second pass additionally found native SIGBUS (135) in `tests/arm64/atomics/ldxp-stlxp.c` with `clang -O2 -static -march=armv8.1-a+lse`. It is not counted as guest coverage. CAS128, CLREX, exclusive-width and LDPSW fixtures passed native/release/debug; they do not replace the blocked broad suite. The near-neighbour read-fault workaround is documented in [LIMITATIONS.md](LIMITATIONS.md#memory-and-code-protection).
-
-The broad runtime suite depends on package-manager workers and live repositories. A package bootstrap failure precedes emulator rows and is recorded as an infrastructure failure, not an emulator pass or regression. Older reports under `reports/` apply only to the code and environment they name.
+The nearby-page read-fault workaround is described in
+[LIMITATIONS.md](LIMITATIONS.md#memory-and-code-protection). A historical proc
+exit139 remains unattributed; the captured later defects have separate evidence.
+Sanitizer runtime and accelerated Apple device validation have not run.
 
 ## Before commit
 
@@ -190,15 +174,21 @@ git status --short
 
 Run the focused regression and the release runtime gate for behavioural changes. Use the debug gate for memory, signal, concurrency and translated-execution changes. Check Markdown links after moving documentation. Version or release changes must also follow [RELEASES.md](RELEASES.md).
 
-## Experimental native/AOT host gate (default off)
+## Native/AOT and artifact checks
 
-On the isolated integration branch, use `make test-aot-generator` and
-`make test-arm64-native-emitter` for image failure handling, native instruction
-oracles and precise fault restart. `make record-arm64-aot` discovers the four
-Alpine module versions; `make test-arm64-linked-aot` requires a separately linked
-`jit_emit=false` CLI and checks real workload outputs and image use.
+AOT is available on master and disabled by default. Use
+`make test-aot-generator test-aot-kit` for tool validation and
+`make test-arm64-native-emitter` for emitted-code/restart fixtures.
+`test-arm64-linked-aot` requires a separately linked no-emitter CLI.
 
-Build recipe, evidence matrix, fresh-process performance and platform limits:
-[Alpine native/AOT host integration](reports/audits/AOT_ALPINE_HOST_2026-09-29.md).
-Passing Linux gates does not enable the backend in Xcode or validate signed iOS
-images. Keep the default/app gadget engine until those separate gates pass.
+The [Linux AOT guide](NATIVE_AOT_BUILD_PLAN.md) gives release/debug build and
+runtime commands. The [artifact guide](NATIVE_AOT_ARTIFACT_KIT.md) restores
+independent roots, retains runner logs and validates staging before publication.
+It also compares complete fakefs logical contents and provides actual-image PC
+checks. Image-install counters measure lookup/installation, so keep execution
+proof separate.
+
+Run `make check-docs` for local link targets and
+`make check-docs-style` for maintained prose. The style checker skips code
+blocks and dated/vendor material. It catches selected patterns; read the prose
+and verify command semantics as well.

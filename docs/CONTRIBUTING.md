@@ -6,7 +6,7 @@ Changes must preserve ARM64 guest correctness and leave a repeatable test. Read 
 
 ```sh
 git submodule update --init --recursive
-make build-arm64-linux
+CC=clang make build-arm64-linux
 ```
 
 Use an AArch64 Linux host for the command-line build. The supported build uses Clang's integrated assembler.
@@ -40,7 +40,7 @@ Memory, signal, synchronisation and translated-execution changes also need the d
 
 A timeout, safety valve, unexpected diagnostic or skipped row is not a pass. Record package and rootfs failures separately from emulator results.
 
-For performance-only changes, the correctness fixture should pass both the baseline and candidate; use a deliberate negative mutation to show it detects the invariant being protected, then restore and rebuild. Keep paired timing separate from correctness runs, use identical commands and input bytes, and reject changes whose benefit does not repeat. Do not mask a native-oracle failure or broaden a passing-test claim beyond the paths actually exercised.
+For performance-only changes, the correctness fixture should pass both the baseline and candidate; use a deliberate negative mutation to show it detects the invariant being protected, then restore and rebuild. Keep paired timing separate from correctness runs, use identical commands and input bytes, and reject changes whose benefit does not repeat. Preserve native-oracle failures and record the exact paths exercised by each test.
 
 ## Documentation
 
@@ -49,13 +49,23 @@ The maintained guides describe current `master`:
 - `README.md` for project scope and first use;
 - `docs/ARCHITECTURE.md` for durable design;
 - `docs/LINUX_DEVELOPMENT.md` and `docs/IOS_APPLICATION.md` for procedures;
+- `docs/NATIVE_AOT_BUILD_PLAN.md`, `docs/NATIVE_AOT_ARTIFACT_KIT.md` and
+  `docs/NATIVE_AOT_IOS.md` for AOT recording, reusable inputs and Apple integration;
 - `docs/VALIDATION.md` for gates;
 - `docs/LIMITATIONS.md` for known constraints;
 - `docs/RELEASES.md` for version and tag changes.
 
 Put a dated investigation or benchmark under `docs/reports/` when its values depend on a revision, host, rootfs or package set. Do not turn a dated report into current guidance by linking it without its date and scope.
 
-Write exact commands, paths and identifiers. State measured results with their revision and environment. Remove unsupported superlatives and third-party deployment claims that the repository cannot verify.
+Lead with the fact. Use British English, concrete nouns and active verbs. Keep
+commands, paths and identifiers exact. Put the revision, hardware and test scope
+beside measured results. Link to detailed evidence instead of repeating it.
+
+Remove inflated adjectives, rhetorical questions, sincerity claims, manufactured
+contrasts and commentary about what a document proves or implies. State the
+operation, failure or missing test directly. Avoid repeated warnings and closing
+summaries. Keep safety requirements and uncertainties when shortening prose.
+Dated evidence and upstream/third-party text retain their original wording.
 
 When moving a document, update relative links in the moved file and every maintained guide. Preserve upstream translations under `docs/legacy/`; do not silently rewrite them as current fork documentation.
 
@@ -68,6 +78,9 @@ git diff --stat
 git diff
 ```
 
-Run `make check-docs`, then confirm that commands in changed procedures match the Makefile, Meson files, Xcode schemes or scripts that implement them.
+Run `make check-docs check-docs-style test-docs-style`, then confirm that commands
+in changed procedures match the Makefile, Meson files, Xcode schemes or scripts
+that implement them. The style scanner skips code, quotations and tables;
+review those and multi-line prose manually.
 
-Commit source, its regression fixture and the relevant documentation in the same tranche. Push only after the local branch is based on the intended remote tip. Create release tags from a clean, pushed commit after the app version and Apple build number match the release guide.
+Commit source, its regression fixture and the relevant documentation together. Push only after the local branch is based on the intended remote tip. Create release tags from a clean, pushed commit after the app version and Apple build number match the release guide.

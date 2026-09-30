@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.3.0 with Apple build number 813; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.3.1 with Apple build number 814; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 
@@ -94,12 +94,13 @@ Validate both paths before accepting them from an external caller. A bind mount 
 native_offload_add_handler("ffmpeg", fake_ffmpeg_main);
 ```
 
-Generic `ffmpeg`/`ffprobe` handlers only claim exact `/bin`, `/usr/bin` or
+Generic `ffmpeg`/`ffprobe` handlers select only exact `/bin`, `/usr/bin` or
 `/usr/local/bin` paths. Relative paths and private binaries fall through to
 emulated exec; readable shebang wrappers are not replaced. Set `NO_OFFLOAD=1`
 (or upstream-compatible `MINIS_NO_FFMPEG_OFFLOAD=1`) in the guest environment to
 disable these generic offloads. Synthetic Apple-only commands are unaffected.
-This is an exec-selection safeguard, not a sandbox or a canonical-path guarantee.
+The safeguard controls exec selection. Host path validation and sandbox controls
+are still required.
 
 The FFmpeg scheme uses this path for its test handler. Darwin builds can also map a guest command to a host executable through the `-n NAME=PATH` command-line form used by the shared launcher code. Native handlers execute with the app's host privileges and must not treat guest arguments or paths as trusted.
 
@@ -109,24 +110,27 @@ The FFmpeg scheme uses this path for its test handler. Darwin builds can also ma
 
 Do not use the inherited upload lane for this fork until its scheme, bundle identifiers, signing repository, TestFlight groups and GitHub repository are changed and reviewed. The generated `fastlane/README.md` only lists lane names; it is not a release runbook for `ios-linuxkit`.
 
-## Release boundary
+## Device checks
 
-Linux-host validation can establish emulator and guest-runtime behaviour. It cannot validate Xcode compilation, entitlements, signing, installation, background behaviour or App Store processing. Run the relevant Linux gates before handoff, then build and smoke-test the exact iOS archive on macOS and a physical device.
+Build and smoke-test the exact signed archive on a physical device before
+distribution. Linux tests exercise emulator behaviour; Xcode compilation,
+entitlements, installation, background operation and App Store processing need
+Apple tools and hardware.
 
-The [2.3.0 source release](reports/releases/IOS_LINUXKIT_2.3.0.md) includes the default-off backend and Alpine 3.24.2 packaging pin. It does not enable AOT in these schemes or upgrade existing installed userlands. The [native/AOT build plan](NATIVE_AOT_BUILD_PLAN.md) separates tested Linux commands from the remaining Apple implementation and acceptance gates.
+Check terminal and upgrade-session creation, native-offload wrappers and opt-outs,
+timers and interrupted sleeps, repeated fork/exec/exit with concurrent procfs/ps
+scans, memory pressure, precise load faults and foreground/background transitions.
+The [source release records](reports/README.md) retain the Linux tests and
+source-review results for earlier app changes.
 
-The [2.2.2 source release](reports/releases/IOS_LINUXKIT_2.2.2.md) hardens CLI crash-handler writes and C/assembly layout checks without enabling native JIT/AOT or changing the rootfs. Linux synthetic-context tests do not validate Apple signal return.
+## AOT app integration
 
-The [2.2.1 source release](reports/releases/IOS_LINUXKIT_2.2.1.md) fixes a cross-platform procfs lock-order cycle and costly numeric PID lookup, but its stress validation is Linux-only. Include concurrent procfs/ps scans during repeated fork/exec/exit in device smoke tests.
+The native/AOT backend is available through Meson and tested with linked Linux
+ELF images. Existing Xcode schemes do not configure it or link images. The
+[Apple AOT procedure](NATIVE_AOT_IOS.md) specifies the isolated build settings,
+shared ABI checks, app fault recovery, Mach-O conversion, static linkage,
+signing and device tests needed to add it.
 
-The [2.2.0 source release](reports/releases/IOS_LINUXKIT_2.2.0.md) includes Darwin Mach-right cleanup, app thread-start error handling and consistent ARM64 launch environments alongside the userspace runtime imports. On the intended device build, check terminal/upgrade session creation, native-offload wrappers and opt-outs, timers and interrupted sleeps, repeated fork/exec/exit, memory pressure, precise load faults and foreground/background transitions. These Apple paths are source-reviewed, not device-validated here; Linux timing results do not establish iOS latency, thermals or battery use.
-
-### Experimental native/AOT boundary
-
-Master now has a default-off Meson backend and a tested Linux
-ELF AOT-only CLI for Alpine 3.24.2. It is **not wired into these Xcode schemes**.
-Do not treat Linux image acceptance as Apple signing/device validation. The
-next app tranche needs consistent ABI flags, app recovery hooks, signed Mach-O
-image linkage, bundle-size review and device tests. See the
-[host integration report](reports/audits/AOT_ALPINE_HOST_2026-09-29.md) and
-[reproduction/rollout plan](NATIVE_AOT_BUILD_PLAN.md).
+The [2.3.1 source release](reports/releases/IOS_LINUXKIT_2.3.1.md) includes
+artifact tools and operating guides. It keeps the gadget-only app configuration
+and Alpine 3.24.2 pin. Existing installed userlands are unchanged.

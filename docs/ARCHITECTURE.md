@@ -23,9 +23,18 @@ precompiled AArch64 gadgets (`gadgets-aarch64/*.S`)
 Linux or Darwin host APIs
 ```
 
-The decoder builds a `fiber_block` for each guest basic block. Its code array contains addresses of precompiled gadget functions and their operands. Each gadget performs part of a guest instruction and branches to the next gadget. All executable host instructions come from the built application. Translated programs are data arrays and need no `MAP_JIT` memory.
+The decoder builds a `fiber_block` for each guest basic block. Its code array contains addresses of precompiled gadget functions and their operands. Each gadget performs part of a guest instruction and branches to the next gadget. In the default gadget engine, executable host instructions come from the built application. Translated programs are data arrays and need no executable allocation.
 
-The word `jit` survives in internal identifiers such as `jit_saved_pc` and `jit_crash_trampoline`. In these names it means translated-block execution or fault recovery.
+The optional native backend in `asbestos/guest-arm64/jit.c` compiles selected
+gadget blocks into ARM64 instructions. A recording build uses separate Linux
+RW/RX aliases. An AOT-only build links generated images and compiles out the
+runtime emitter with `jit_emit=false`. Images match guest module bytes and the
+recorded ABI; uncovered or rejected code uses gadgets. Native links participate
+in block ownership and invalidation. Ordinary builds set `jit=false`.
+
+Both engines use internal names such as `jit_saved_pc` and
+`jit_crash_trampoline`. See [Linux AOT](NATIVE_AOT_BUILD_PLAN.md) for build modes
+and [iOS AOT](NATIVE_AOT_IOS.md) for the unfinished app integration.
 
 ## Decoder and gadgets
 
@@ -58,6 +67,14 @@ A host `SIGSEGV` or `SIGBUS` can occur inside a memory gadget when a guest acces
 The precise saved address prevents earlier instructions in the same block from executing twice. Normal-register unsigned-immediate `LDR X` saves that address inside `load64_imm_fast`, consuming `[operands][guest PC]` together instead of dispatching a separate PC-save gadget. Its LDR+CBZ/CBNZ fusion already saves the LDR PC internally; other memory forms retain their existing saves. Operand-stream producers and consumers must change together.
 
 A separate broad synthetic read-fault fallback is compiled only with `ENABLE_ARM64_READ_FAULT_RECOVERY` and is disabled in ordinary builds. This does **not** disable all compatibility recovery: `kernel/calls.c` still demand-maps readable zeros for an unmapped read page with a mapped neighbour within 16 pages, and retains targeted V8 recovery paths. These can suppress guest faults that native Linux would deliver. See [limitations](LIMITATIONS.md#memory-and-code-protection) and the [load-PC evidence](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md).
+
+Native memory operations record the exact host/guest PC, address and direction
+at each faultable access after canonicalising guest state. Recovery accepts a
+matching active checkpoint, disarms it and retries the guest instruction.
+Unmatched native faults stop execution. The ABI hash includes checkpoint/frame
+offsets, entry and pinning conventions, TLB/context layout and table sizes;
+incompatible images are rejected. Actual Linux restart tests and limits are in
+the [host report](reports/audits/AOT_ALPINE_HOST_2026-09-29.md).
 
 ## Userspace kernel
 
@@ -98,6 +115,6 @@ The initial process path in `xX_main_Xx.h` adds `--jitless`, `--no-lazy`, `--no-
 
 ## iOS application boundary
 
-The `iSH-ARM64` target links the userspace kernel and emulator libraries into an iOS application. Its build downloads the AArch64 Alpine rootfs declared by `app/GuestARM64.xcconfig`. `app/download-root.sh` extracts `bin/busybox`, checks that it is AArch64, and rejects a rootfs for another architecture.
+The `iSH-ARM64` target links the userspace kernel and emulator libraries into an iOS application. Its build downloads the AArch64 Alpine rootfs declared by `app/GuestARM64.xcconfig`. `app/download-root.sh` verifies the pinned SHA-256 and AArch64 BusyBox before atomically replacing the bundled archive.
 
 Host integration includes fakefs bind mounts through `fakefs_bind_mount()` and optional native command handlers through `native_offload_add_handler()`. These interfaces run inside the app's iOS sandbox and inherit its trust boundary.

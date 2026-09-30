@@ -4,7 +4,7 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
-The current source version is **2.3.0** with Apple build number **813**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/AOT backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
+The current source version is **2.3.1** with Apple build number **814**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
 
 ## What is in the repository
 
@@ -57,8 +57,8 @@ echo '9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773  alpine-m
 
 | Task | Command |
 |---|---|
-| Build release | `make build-arm64-linux` |
-| Build release and debug | `make build-arm64-linux-all` |
+| Build release | `CC=clang make build-arm64-linux` |
+| Build release and debug | `CC=clang make build-arm64-linux-all` |
 | Check documentation links | `make check-docs` |
 | Test AdvSIMD FP widening and narrowing | `CC=clang make test-arm64-fcvt-vector` |
 | Test `/proc/<pid>/mem` seek semantics | `CC=clang make test-arm64-proc-mem-seek` |
@@ -75,17 +75,32 @@ echo '9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773  alpine-m
 
 The runtime and CLI targets can install packages into their fakefs. Use a disposable copy when package state matters. Reports are written to `REPORT_DIR`, which defaults to `/workspace/tmp`.
 
-[The July 2026 OpenMinis audit](docs/reports/audits/OPENMINIS_AUDIT_2026-07-20.md) records the repository-wide comparison at `35dac743` and the AdvSIMD conversion follow-up at `40f1bf40`. The follow-up added `FCVTN`, `FCVTN2`, `FCVTXN` and `FCVTXN2`; clean Clang release and debug builds and the native-oracle/guest fixture passed. The earlier broad suite reached 82/83 because the tested rootfs Clojure package lacked `clojure.main`.
+## AOT builds
 
-[Source release 2.3.0](docs/reports/releases/IOS_LINUXKIT_2.3.0.md) merges the default-off native/AOT backend, targeted musl/BusyBox/Python/zlib recording pipeline, Alpine 3.24.2 packaging pin and integration correctness fixes. Linux AOT-only execution is validated; measured gains are modest and Python regresses. Existing userlands are not migrated, and no accelerated iOS build is implied. See the [local accelerated-build and iOS rollout plan](docs/NATIVE_AOT_BUILD_PLAN.md).
+[Build AOT on Linux](docs/NATIVE_AOT_BUILD_PLAN.md) to record musl, BusyBox,
+Python and zlib, link an emission-disabled executable, test it and compare it
+with gadgets. [Freeze and share artifacts](docs/NATIVE_AOT_ARTIFACT_KIT.md)
+for repeatable builds from retained guest bytes and recordings.
+[Prepare iOS images](docs/NATIVE_AOT_IOS.md) after implementing the required
+Apple build and recovery hooks.
 
-[Source release 2.2.2](docs/reports/releases/IOS_LINUXKIT_2.2.2.md) hardens the current engine's CLI crash handler: correct-width fault-flag stores, compile-time C/assembly layout checks and the generated-header build dependency. Fresh release/debug builds pass seven focused gates, 14/14 continuation checks and four exact native-oracle comparisons each. This patch does not include the experimental native/AOT backend or change the packaged userland.
+The tested local prototype improves short shell and zlib workloads by about
+12–13%; Python takes about 15% longer and uses more memory. See the
+[29 September measurements](docs/reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md).
+Package upgrades can invalidate images. Existing installed userlands are left
+unchanged; ordinary Meson and Xcode configurations keep the gadget engine.
 
-[Source release 2.2.1](docs/reports/releases/IOS_LINUXKIT_2.2.1.md) fixes a captured procfs inode/PID/memory lock cycle and replaces repeated PID-table scanning with bounded numeric lookup. The full procfs/exit gate now checks its tools, tracks worker PIDs explicitly and requires useful work from every fork/proc/ps worker. The [investigation](docs/reports/audits/PROCFS_EXIT_STRESS_2026-09-28.md) separates the original shell-harness timeout from the real lock cycle and records negative regressions, repeated passes and residual limitations.
+## Releases and evidence
 
-[Source release 2.2.0](docs/reports/releases/IOS_LINUXKIT_2.2.0.md) adopts the validated September OpenMinis imports: instruction/syscall correctness, precise signal-interruptible waits, task and filesystem lifetime fixes, allocation-failure handling, balanced anonymous-memory accounting and native-offload selection safeguards. Fresh release/debug builds pass all six focused gates, 14 internal-continuation checks per build and four supplemental native-oracle comparisons. A focused Linux open/fstat/close benchmark measured about **14% lower median time** in the imported candidate, not an application-wide or iOS speedup. The [complete import audit](docs/reports/audits/OPENMINIS_IMPORT_2026-09-28.md) records all 55 upstream commit dispositions, exclusions and unresolved validation limits.
+[2.3.1](docs/reports/releases/IOS_LINUXKIT_2.3.1.md) adds the reusable artifact
+tools and AOT guides, corrects recorder package inventory and preserves staged
+builds when publication encounters an existing output. It retains the execution
+backend and Alpine 3.24.2 pin from [2.3.0](docs/reports/releases/IOS_LINUXKIT_2.3.0.md).
+Apple signing and device validation have not run for the accelerated backend.
 
-[Source release 2.1.3](docs/reports/releases/IOS_LINUXKIT_2.1.3.md) reduces common 64-bit load dispatch overhead while preserving the exact fault retry PC. Two controlled ARM Linux Python compute series against 2.1.2 measured **1.9–2.6% median improvement**, with 23/30 faster pairs; shell startup remained noisy. Fresh release/debug gates include an 18-case native-oracle fault/retry fixture. The release notes record the existing read-fault workaround, native fixture and broad-suite limitations, and outstanding iOS validation. The preceding [2.1.2 release](docs/reports/releases/IOS_LINUXKIT_2.1.2.md) contains the full-width `lseek` and CPU poke changes; percentages from separate passes are not cumulative measurements.
+Earlier source releases and dated audits are indexed under
+[reports](docs/reports/README.md). Their measurements apply to the revisions,
+hosts and guests named in each report.
 
 ## Documentation
 
@@ -95,7 +110,9 @@ The runtime and CLI targets can install packages into their fakefs. Use a dispos
 | [Architecture](docs/ARCHITECTURE.md) | Interpreter, memory, kernel and host boundaries. |
 | [Linux development](docs/LINUX_DEVELOPMENT.md) | Building, fakefs creation, command-line use and diagnostics. |
 | [iOS application](docs/IOS_APPLICATION.md) | Xcode schemes, rootfs packaging and host integration. |
-| [Native/AOT build plan](docs/NATIVE_AOT_BUILD_PLAN.md) | Reproducing local AOT and gating recording reuse, Mach-O linkage and device rollout. |
+| [Linux AOT](docs/NATIVE_AOT_BUILD_PLAN.md) | Recording, linking, running, testing and measuring local AOT. |
+| [AOT artifacts](docs/NATIVE_AOT_ARTIFACT_KIT.md) | Freezing, restoring, validating and publishing reusable inputs/builds. |
+| [iOS AOT](docs/NATIVE_AOT_IOS.md) | Target compatibility checks, Mach-O conversion and Apple integration. |
 | [Validation](docs/VALIDATION.md) | Test gates, reports and failure rules. |
 | [Limitations](docs/LIMITATIONS.md) | Security, compatibility and unsupported workloads. |
 | [Contributing](docs/CONTRIBUTING.md) | Change and documentation requirements. |

@@ -151,7 +151,10 @@ async function build(seed:string,images:string,out:string) {
  await json(join(s,'pending.json'),{kind:'build',provenance,seedManifestSha256:await sha(join(seed,'manifest.json')),imagesManifestSha256:await sha(join(images,'manifest.json'))});
  console.log(`BUILT_PENDING=${s}\nValidate build directories, then publish ${s} ${out}`);
 }
-async function publish(s:string,out:string) {
+export async function publish(s:string,out:string) {
+ // Refuse before removing build caches or pending.json, so a destination typo
+ // leaves the validated staging directory available for a corrected retry.
+ if(existsSync(out))throw Error(`refusing existing output: ${out}`);
  const p=JSON.parse(readFileSync(join(s,'pending.json'),'utf8'));if(p.kind!=='build')throw Error('not pending build');
  if(!existsSync(join(s,'evidence/acceptance.json')))throw Error('missing evidence/acceptance.json');
  const a=JSON.parse(readFileSync(join(s,'evidence/acceptance.json'),'utf8'));if(a.status!=='pass')throw Error('acceptance not passing');

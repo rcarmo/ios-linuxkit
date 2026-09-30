@@ -1,116 +1,201 @@
-# Reusable native/AOT prototype artifact kit
+# Freeze, rebuild and share AOT artifacts
 
-Prototype tools, based on v2.3.0; ordinary builds remain default-off. No new
-release or accelerated iOS application. See [the rollout plan](NATIVE_AOT_BUILD_PLAN.md)
-for hardware, measured performance and Apple-only acceptance gates.
+`tools/jit_aot/kit.ts` packages the exact guest, recordings and build provenance
+needed to reproduce a Linux AOT executable. A seed also supplies the inputs for
+[Apple image generation](NATIVE_AOT_IOS.md).
 
-`tools/jit_aot/kit.ts` provides explicit stages. Run its `help` command. Use an
-absolute durable directory outside `/tmp`; generated outputs must not exist and
-their parent must exist. Failed stages retain `.partial-PID` diagnostics and do
-not publish a complete output. Run `make test-aot-kit test-aot-generator`.
+Use the [Linux AOT guide](NATIVE_AOT_BUILD_PLAN.md) to build a recorder and train
+musl, BusyBox, Python and zlib. The commands here start with its `WORK`, `ROOT`,
+`RECORDINGS` and `GADGET_BUILD` variables. All paths must be absolute. Output
+parents must exist, outputs must be new, and only one writer may use each path.
 
-## Inputs and freezing
+## Payloads and trust
 
-Stop **all** guests using the source fakefs. `prepare ROOT RECORDINGS
-GADGET_BUILD OUT --quiescent` requires a committed clean source checkout and
-checks the targeted recorder's manifest, module/recording/image hashes and ABI.
-It retains a raw fakefs archive including SQLite WAL plus a portable guest tar
-exported via `unfakefsify` from a private clone. It compares complete source
-backing-file hashes/modes before/after; this is mutation detection, not locking
-against an uncooperative external writer. The caller owns quiescence.
+| Directory kind | Contents |
+|---|---|
+| Seed | Raw fakefs snapshot, portable guest archive, JSONL, original images/recorder, workload, package metadata, source archive and toolchain record. |
+| Generated | Four ELF or Mach-O assemblies, generator logs, headers/symbol requirements, workload and seed-manifest hash. |
+| Build | Gadget/release/debug binaries, build options, source archive, logs and acceptance evidence. |
+| Restored guest | Writable `root/data` and SQLite metadata for a new run; keep outside sealed payloads. |
 
-A plain archive of `data/` is not a guest rootfs: symlink targets and guest
-permissions live in fakefs metadata. Restore through `fakefsify` using
-`rootfs.tar.gz`; this rebuilds inode identities. Retain `meta.db` and any WAL with
-the raw snapshot for forensic recovery. Installed APK metadata, repository URLs
-and public keys are included; exact APK archives are not. Exact guest files are
-in the export. No package installation or existing-userland upgrade occurs.
+A completed seed, generated set or build has an `ish-aot-kit/v1` manifest.
+`verify` checks every payload file's SHA-256, size and mode and rejects extra
+files and symlinks. The manifest itself can be edited, so distribute a trusted
+archive checksum separately. Use trusted input archives; the kit does not
+sandbox native helpers or validate hostile tar files.
 
-Each sealed directory has a versioned JSON manifest with every payload file's
-SHA-256, size and mode. Paths are relative; no payload symlinks or unlisted files
-are accepted. The manifest is not a signature: use a separately trusted checksum
-when distributing. Do not feed untrusted archives or manifests to these tools.
+Publication renames a staging directory to the output on the same filesystem.
+Failed stages retain `.partial-PID` files. This protects against publishing an
+incomplete run; it provides no lock against another process writing the same
+paths. Keep both output and source under a single operator's control.
 
-## Stages
+## Freeze the training guest
+
+Stop every guest using `ROOT`. Include SQLite `meta.db`, `meta.db-wal` and
+`meta.db-shm` with the backing data. Guest permissions and symlink types are
+stored in metadata, so archiving `data/` alone loses them.
+
+Use a clean Git checkout at the intended source revision. `prepare` and `build`
+run `git archive`; they refuse tracked or untracked working-tree changes. Keep
+artifact outputs outside the checkout. A build's source revision records the
+checkout used by the kit; the original recorder hash/revision stays separate.
 
 ```sh
-bun tools/jit_aot/kit.ts prepare "$ROOT" "$RECORDINGS" "$GADGET_BUILD" "$SEED" --quiescent
+SEED="$WORK/seed"
+ELF="$WORK/elf"
+PRODUCT="$WORK/linux"
+bun tools/jit_aot/kit.ts prepare \
+  "$ROOT" "$RECORDINGS" "$GADGET_BUILD" "$SEED" --quiescent
 bun tools/jit_aot/kit.ts verify "$SEED"
-bun tools/jit_aot/kit.ts restore "$SEED" "$RUN"
-bun tools/jit_aot/kit.ts generate "$SEED" "$IMAGES" elf
-bun tools/jit_aot/kit.ts build "$SEED" "$IMAGES" "$BUILD"
 ```
 
-`build` creates fresh gadget, AOT release and AOT debug Meson directories and
-prints a pending directory. AOT compiles with `jit_emit=false`. Validate that
-pending directory before `publish PENDING BUILD`: an `evidence/acceptance.json`
-with passing status is required. Publication removes non-relocatable build
-caches but retains binaries, compiler/Meson options, source snapshot and logs.
-The acceptance record is an evidence assertion, not a substitute for running
-its gates. Source archives contain tracked source and submodule revision lists;
-submodules are not embedded. The Linux build uses system SQLite/libarchive.
+`prepare` checks module, JSONL, image, workload and original recorder hashes. The
+original recorder must still exist at the path in the recording manifest. It
+copies the raw fakefs, exports `rootfs.tar.gz` from a private clone and compares
+source content/mode hashes before and after. `--quiescent` is your confirmation
+that no guest is running; the script cannot stop an external writer.
+
+The seed retains installed APK metadata, repository URLs and public keys, plus
+all installed guest bytes. It does not fetch original APK archives. Keep any
+available package archives separately if later package installation must work
+without repositories. Source archives list submodule revisions but omit their
+contents; the Linux CLI uses system SQLite/libarchive. Apple builds need the
+recorded submodules.
+
+## Restore and regenerate without training
 
 ```sh
-bun tools/jit_aot/kit.ts run "$BUILD" "$RUN/root" release /bin/sh
-bun tools/jit_aot/kit.ts run "$BUILD" "$RUN/root" off /bin/sh
-bun tools/jit_aot/kit.ts run "$BUILD" "$RUN/root" gadget /bin/sh
+bun tools/jit_aot/kit.ts restore "$SEED" "$WORK/restored"
+RUN_ROOT="$WORK/restored/root"
+bun tools/jit_aot/kit.ts generate "$SEED" "$ELF" elf
+bun tools/jit_aot/kit.ts verify "$ELF"
 ```
 
-Launch sanitises all inherited `ISH_JIT*` and `ISH_AOT*` knobs and sets explicit
-mode/stats/family values. It verifies the immutable bundle, not the writable
-userland on each launch: changed packages must fall back safely. Do not launch
-against the source snapshot or start concurrent writers on one restored root.
-For retraining only, `record RECORDER WRITABLE_ROOT OUTPUT` wraps the existing
-checked four-target pipeline; new recordings require a new seed and validation.
+Restore uses the retained Linux `fakefsify` binary and imports the portable
+archive with new host inode numbers. Run it on a compatible AArch64 Linux host.
+Generation extracts the four module files using host `tar`, checks their hashes
+and resolves symbols with `nm`; it does not execute the recorder. The resulting
+assembly uses the original recording ABI. Unresolved symbols stop generation.
 
-## Apple handoff, not a portable Linux executable
+`record RECORDER WRITABLE_ROOT OUTPUT` is available for deliberate retraining.
+It writes the targeted recorder result under `OUTPUT/recordings`; pass that
+subdirectory to `prepare`. Use a new seed after retraining.
 
-The seed is the shared Linux/iOS input kit: raw PIC JSONL, exact module bytes,
-workload, recorder binary/provenance, generator source and package identity.
-Linux binaries and ELF assembly cannot be linked directly into an iOS app.
+## Build and validate before publishing
 
 ```sh
-bun tools/jit_aot/kit.ts generate "$SEED" "$MACHO_IMAGES" macho \
-  "$APPLE_SYMBOL_BINARY" "$OBSERVED_APPLE_CONTRACT"
+bun tools/jit_aot/kit.ts build "$SEED" "$ELF" "$PRODUCT" > "$WORK/build.log" 2>&1
+PENDING=$(sed -n 's/^BUILT_PENDING=//p' "$WORK/build.log")
+test -n "$PENDING"
+test -f "$PENDING/pending.json"
 ```
 
-Generation extracts only the hash-checked module bytes using host `tar`; it does
-not execute the retained Linux recorder/importer on macOS. Install Bun, Python3
-and Apple command-line tools (`nm`) on the Mac. Use the same generator source.
+The build creates fresh gadget, AOT release and AOT debug binaries. Both AOT
+configurations use `jit_emit=false`. `PENDING` is a staging directory; leave it
+at its printed path until validation finishes because Meson stores absolute
+paths. Build commands require a clean Git checkout and Clang/Meson/Ninja/Make.
 
-The contract JSON must contain numeric `abi`, `prologue_words`, `entry_off`,
-`n_pinned`, plus `binarySha256`, `arch: "aarch64"`, `endian: "little"`,
-`pointerBits: 64`, `platform` (`ios`, `ios-simulator` or `macos`) and nonempty
-`evidence` identifying actual target runtime/layout
-observations. Obtain these from the bootstrap target's `/proc/ish/jit`,
-`jit_abi()` and debugger/layout inspection using its real SDK/flags, not by
-copying the Linux header. The command checks every header, binary hash and
-required defined host symbol, with Mach-O underscore handling. It requires a
-thin ARM64 Mach-O symbol binary, rejects undefined imports and never overrides ABI.
-The source generator also rejects unnamed code relocations; the kit adds checks
-for gadget key symbols, which could otherwise be null. Missing symbols or ABI
-mismatch fail before publication. These are rejection guards, not proof of ABI
-semantic equivalence or device correctness.
+Run the following from the repository root. Each configuration receives a fresh
+guest. The relative build path is needed by older Make targets that prepend
+`CURDIR`. Evidence directories must be separate for each runner.
 
-If incompatible, record using a matching Darwin/target-layout recorder and
-repeat identity checks; macOS alone does not prove iOS layout equality. Apple
-ISA/platform registers, pointer authentication, FP/SIMD preservation, page-size
-and precise fault context remain device gates. The current Linux kit does not
-run Apple binaries or claim Apple contract validity.
+```sh
+set -eu
+mkdir -p "$PENDING/evidence"
+for MODE in release debug; do
+  bun tools/jit_aot/kit.ts restore "$SEED" "$WORK/test-$MODE"
+  TEST_ROOT="$WORK/test-$MODE/root"
+  BUILD=$(realpath --relative-to="$PWD" "$PENDING/build-$MODE")
+  EVIDENCE_DIR="$PENDING/evidence/linked-$MODE" make test-arm64-linked-aot \
+    RELEASE_BUILD_DIR="$BUILD" ROOTFS_DIR="$TEST_ROOT" AOT_RECORD_DIR="$ELF" \
+    > "$PENDING/evidence/linked-$MODE.log" 2>&1
+  CC=clang HOST_CC=clang EVIDENCE_DIR="$PENDING/evidence/upstream-$MODE" \
+    make RELEASE_BUILD_DIR="$BUILD" ROOTFS_DIR="$TEST_ROOT" DEBIAN_ROOTFS_DIR="$TEST_ROOT" \
+    test-arm64-upstream > "$PENDING/evidence/upstream-$MODE.log" 2>&1
+  CC=clang HOST_CC=clang make RELEASE_BUILD_DIR="$BUILD" \
+    ROOTFS_DIR="$TEST_ROOT" DEBIAN_ROOTFS_DIR="$TEST_ROOT" REPORT_DIR="$PENDING/evidence" \
+    test-arm64-poll-regular test-arm64-fcvt-vector test-arm64-load64-fault-pc \
+    test-arm64-proc-mem-seek test-arm64-lseek-width test-arm64-poke-stress \
+    test-arm64-internal-continue-fixtures > "$PENDING/evidence/focused-$MODE.log" 2>&1
+  CC=clang EVIDENCE_DIR="$PENDING/evidence/proc-$MODE" make RELEASE_BUILD_DIR="$BUILD" \
+    DEBIAN_ROOTFS_DIR="$TEST_ROOT" test-arm64-proc-exit-race \
+    > "$PENDING/evidence/proc-$MODE.log" 2>&1
+done
+EVIDENCE_DIR="$PENDING/evidence/native-restart" make test-arm64-native-emitter \
+  NATIVE_BUILD_DIR=build-arm64-recorder > "$PENDING/evidence/native-restart.log" 2>&1
+bun tests/arm64/native-aot/execution.ts "$PENDING/build-debug/ish" \
+  "$RUN_ROOT" "$PENDING/evidence/execution" > "$PENDING/evidence/execution.log" 2>&1
+```
 
-Required Apple implementation remains: isolated Xcode configuration, matching
-shared structure defines, app precise-fault recovery (not CLI `ucontext` copying),
-Mach-O assembly build membership and constructor retention, compile-time
-no-emission mode, normal static signing, exact guest installation/fallback,
-physical-device lifecycle/stress/rollback/size/performance/energy tests. No JIT
-entitlement or downloaded executable-code workaround. Keep existing schemes off.
+A failed command stops the sequence. Preserve its logs and fix the failure
+before publication. `execution.ts` needs GDB and a debug binary. Native restart
+checks use a separate emission-capable recorder build.
 
-## Required local acceptance
+For a full export identity check, compare offline copies before starting guests:
 
-Retained-source and restored-module hashes; release/debug linked no-emitter
-parity; hardware PC hits within all four images with emitter region NULL;
-upstream, poll, FCVT, precise load-PC, seek/poke, continuation and full procfs
-stress; exact native-restart/oracle tests; deliberate incompatible image rejection;
-fresh-process performance/startup/memory/size measurements; clean-directory
-restore and offline regeneration without retraining. [Prototype evidence](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md)
-records passed gates and explicit Apple pending gates separately.
+```sh
+mkdir "$WORK/raw-copy"
+tar -xzf "$SEED/fakefs-snapshot.tar.gz" -C "$WORK/raw-copy"
+bun tools/jit_aot/kit.ts restore "$SEED" "$WORK/identity-copy"
+bun tests/arm64/native-aot/fakefs-identity.ts \
+  "$WORK/raw-copy" "$WORK/identity-copy/root" "$PENDING/evidence/identity.json"
+```
+
+This compares every logical path, guest stat blob, hardlink group and file byte,
+ignoring host inode numbers and timestamps. SQLite may update shared-memory
+files even on a read-only connection; inspect copies only.
+
+After the commands pass, inspect the pass markers and reports. Write an
+acceptance record naming the actual logs and any limits. A minimal record is:
+
+```json
+{
+  "status": "pass",
+  "checks": ["linked-release.log", "linked-debug.log", "upstream-release.log", "upstream-debug.log", "focused-release.log", "focused-debug.log", "proc-release.log", "proc-debug.log", "native-restart.log", "execution.log", "identity.json"],
+  "limits": ["Apple SDK, signing and physical-device tests have not run"]
+}
+```
+
+Save it as `PENDING/evidence/acceptance.json`. `publish` checks only that the
+record says `status: pass`; the operator must inspect and retain the evidence.
+It deletes non-relocatable build caches. Keep a separate copy first if more
+archive-linked tests are needed.
+
+```sh
+bun tools/jit_aot/kit.ts publish "$PENDING" "$PRODUCT"
+bun tools/jit_aot/kit.ts verify "$PRODUCT"
+bun tools/jit_aot/kit.ts run "$PRODUCT" "$RUN_ROOT" release /bin/sh
+bun tools/jit_aot/kit.ts run "$PRODUCT" "$RUN_ROOT" off /bin/sh
+```
+
+The launcher removes inherited `ISH_JIT*`/`ISH_AOT*` variables and selects the
+requested mode. It hashes the executable bundle on each invocation; the writable
+guest is outside that manifest. Updated guest programs use normal runtime image
+matching and gadget fallback.
+
+## Archive and restore the delivered files
+
+Keep the source checkout or a source archive with the kit. Run a clean-directory
+restore/generate/build rehearsal before sharing it. A source archive can use the
+explicit Meson commands in the [Linux guide](NATIVE_AOT_BUILD_PLAN.md); the kit's
+`build` publication stage requires Git provenance.
+
+```sh
+# WORK contains seed/, elf/ and linux/. Retain source independently as well.
+tar -czf "$WORK/local-aot.tar.gz" -C "$WORK" seed elf linux
+sha256sum "$WORK/local-aot.tar.gz" > "$WORK/local-aot.sha256"
+mkdir "$WORK/archive-check"
+tar -xzf "$WORK/local-aot.tar.gz" -C "$WORK/archive-check"
+for PART in seed elf linux; do
+  bun tools/jit_aot/kit.ts verify "$WORK/archive-check/$PART"
+done
+```
+
+Send the archive checksum through a trusted channel. Do not modify sealed files
+or add logs within a completed payload. Retain new run evidence beside it.
+
+The [29 September delivery](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md) includes
+Linux and iOS-input archives made from the prototype. Their hashes and source
+revisions identify those original files; the 2.3.1 source release does not
+relabel or replace them. The [iOS procedure](NATIVE_AOT_IOS.md) uses the seed's
+exact files and records the additional target checks.

@@ -29,7 +29,7 @@ function requireOK(r: ReturnType<typeof run>, label: string) {
 }
 const discover = run([ish, '-f', root, '/bin/sh', '-ec', `
 cat /etc/alpine-release
-apk info -v musl busybox python3 zlib
+apk list --installed musl busybox python3 zlib
 python3 -c 'import sysconfig; print("PYLIB=" + (sysconfig.get_config_var("INSTSONAME") or sysconfig.get_config_var("LDLIBRARY")))'
 for p in /lib/ld-musl-aarch64.so.1 /bin/busybox /usr/lib/libz.so.1; do readlink -f "$p"; done
 `], { ISH_JIT: '0' });
