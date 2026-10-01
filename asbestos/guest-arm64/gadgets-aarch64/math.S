@@ -8090,6 +8090,52 @@ make_vec_shift_three_same uqshl, uqshl
 make_vec_shift_three_same sqrshl, sqrshl
 make_vec_shift_three_same uqrshl, uqrshl
 
+/*
+ * Scalar saturating add/sub: B/H/S/D, clear every inactive bit of Vd.
+ * Load both operands before storing for all aliases. Use guest FP state for
+ * cumulative FPSR.QC, restoring host thread state afterwards.
+ * Stream: [gadget][rd | rn<<8 | rm<<16 | size<<24]
+ */
+.macro make_sat_scalar name, insn
+.gadget \name\()_scalar
+    ldr x8, [_pc], #8
+    and x9, x8, #0x1f
+    ubfx x10, x8, #8, #5
+    ubfx x11, x8, #16, #5
+    ubfx x12, x8, #24, #2
+    add x13, _cpu, #CPU_fp
+    add x14, x13, x9, lsl #4
+    add x15, x13, x10, lsl #4
+    add x16, x13, x11, lsl #4
+    ldr q0, [x15]
+    ldr q1, [x16]
+    fp_guest_enter x19, x20, x21, w21
+    cbz x12, .L\name\()_scalar_b
+    cmp x12, #1
+    b.eq .L\name\()_scalar_h
+    cmp x12, #2
+    b.eq .L\name\()_scalar_s
+    \insn d0, d0, d1
+    b .L\name\()_scalar_store
+.L\name\()_scalar_b:
+    \insn b0, b0, b1
+    b .L\name\()_scalar_store
+.L\name\()_scalar_h:
+    \insn h0, h0, h1
+    b .L\name\()_scalar_store
+.L\name\()_scalar_s:
+    \insn s0, s0, s1
+.L\name\()_scalar_store:
+    str q0, [x14]
+    fp_guest_leave x19, x20, x21, w21
+    gret
+.endm
+
+make_sat_scalar sqadd, sqadd
+make_sat_scalar uqadd, uqadd
+make_sat_scalar sqsub, sqsub
+make_sat_scalar uqsub, uqsub
+
 // Saturating add/sub (support B/H/S/D)
 make_vec_shift_three_same sqadd, sqadd
 make_vec_shift_three_same uqadd, uqadd

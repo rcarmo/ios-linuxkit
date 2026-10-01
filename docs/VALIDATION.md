@@ -28,6 +28,8 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 
 | Gate | Command | Scope |
 |---|---|---|
+| Scalar saturation | `CC=clang make test-arm64-scalar-saturation` | 19,696 native/guest B/H/S/D add/subtract cases, aliases, full destination clearing, cumulative FPSR.QC and NZCV. |
+| Gzip compatibility/cleanup | `CC=clang make test-arm64-gzip ROOTFS_DIR=/absolute/disposable-alpine-fakefs` | Same frozen BusyBox native/guest compressed bytes, host/guest inflate, bad-input status and file lifecycle; deterministic corpus and hashes, no package fetch. |
 | AdvSIMD FP conversions | `CC=clang make test-arm64-fcvt-vector` | Native AArch64 oracle plus guest widening/narrowing, FP state and decoder masks. |
 | Precise load fault PC | `CC=clang make test-arm64-load64-fault-pc` | Native AArch64 oracle plus 18 guest LDR/CBZ/CBNZ cases: alignment, split loads, exact signal PC and retry state after isolated unmap/remap. |
 | CPU poke delivery | `CC=clang make test-arm64-poke-stress` | Native oracle and five guest repetitions of acknowledged signals to a compute-bound process. |

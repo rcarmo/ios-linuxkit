@@ -171,6 +171,15 @@ perf-bench: build-arm64-linux
 	REPORT_DIR="$(REPORT_DIR)" \
 	./tests/arm64/perf-bench.sh
 
+.PHONY: test-arm64-scalar-saturation test-arm64-gzip
+test-arm64-scalar-saturation: build-arm64-linux
+	ISH_BIN="$(CURDIR)/$(RELEASE_BUILD_DIR)/ish" ROOTFS="$(ROOTFS_DIR)" \
+	CC="$(CC)" bash tests/arm64/simd-saturating/run.sh
+
+test-arm64-gzip: build-arm64-linux
+	bun tests/arm64/simd-saturating/gzip.ts "$(CURDIR)/$(RELEASE_BUILD_DIR)/ish" \
+	"$(ROOTFS_DIR)" "$(REPORT_DIR)/gzip-$$(date +%Y%m%d-%H%M%S)"
+
 .PHONY: test-arm64-fcvt-vector
 test-arm64-fcvt-vector: build-arm64-linux $(DEBIAN_ROOTFS_DIR)
 	CC="$(CC)" \

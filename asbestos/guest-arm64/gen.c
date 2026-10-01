@@ -416,6 +416,10 @@ extern void gadget_scvtf_fixpt_gpr(void);     // SCVTF Sd/Dd, Wn/Xn, #fbits (sig
 extern void gadget_ucvtf_fixpt_gpr(void);     // UCVTF Sd/Dd, Wn/Xn, #fbits (unsigned int to FP fixed-point, GPR)
 extern void gadget_add_scalar_i64(void);      // ADD Dd, Dn, Dm (scalar 64-bit integer)
 extern void gadget_sub_scalar_i64(void);      // SUB Dd, Dn, Dm (scalar 64-bit integer)
+extern void gadget_sqadd_scalar(void);
+extern void gadget_uqadd_scalar(void);
+extern void gadget_sqsub_scalar(void);
+extern void gadget_uqsub_scalar(void);
 // FP vector three-same
 extern void gadget_fp_fadd_vec(void);
 extern void gadget_fp_fsub_vec(void);
@@ -7155,6 +7159,17 @@ skip_three_different:
         uint32_t opcode = (insn >> 11) & 0x1f;
         uint32_t Rn = (insn >> 5) & 0x1f;
         uint32_t Rd = insn & 0x1f;
+
+        // Scalar saturating add/sub permit all B/H/S/D element widths.
+        // Inactive lanes must not contribute to the cumulative saturation flag.
+        if (opcode == 0x01 || opcode == 0x05) {
+            void *sat = opcode == 0x01
+                ? (U ? gadget_uqadd_scalar : gadget_sqadd_scalar)
+                : (U ? gadget_uqsub_scalar : gadget_sqsub_scalar);
+            gen(state, (unsigned long) sat);
+            gen(state, Rd | (Rn << 8) | (Rm << 16) | (sz << 24));
+            return 1;
+        }
 
         void *gadget = NULL;
         if (sz == 3 && opcode == 0x10 && U == 0) {
