@@ -28,4 +28,6 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [Bounded local clustering port — 1 October 2026](audits/LOCAL_CLUSTER_PORT_2026-10-01.md) records the default-off explicit-ticket port, synthetic-span ownership/race/GPF gates and linked no-emitter compatibility; Apple/device validation remains outstanding.
 
+[Held-out AOT evaluation — 1 October 2026](audits/AOT_HELDOUT_2026-10-01.md) records frozen JSON/raw-deflate/search inputs, five alternating runtime-off/AOT pairs with wait4 RSS, Python regressions and a retained baseline gzip failure.
+
 Use the guides in the parent directory for current build, validation and release boundaries. When citing a report, include its date, source revision, host and rootfs if the report supplies them.
