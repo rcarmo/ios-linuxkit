@@ -1,6 +1,6 @@
 # Versioning and releases
 
-The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.3.3**, Apple build **816**, tagged as `v2.3.3` after validation. See the [2.3.3 source release record](reports/releases/IOS_LINUXKIT_2.3.3.md).
+The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.4.0**, Apple build **817**, tagged as `v2.4.0` after validation. See the [2.4.0 source release record](reports/releases/IOS_LINUXKIT_2.4.0.md).
 
 ## Version sources
 

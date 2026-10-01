@@ -47,6 +47,33 @@ lifecycle_marker() {
     "$HERE/anon-accounting.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 -Wl,--wrap=mprotect \
     "${libs[@]}" -o "$TMP/anon-accounting"
 check "$TMP/anon-accounting.log" 'anon-accounting-actual-kernel-ok' "$TMP/anon-accounting"
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/cow-failure.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 -Wl,--wrap=munmap \
+    "${libs[@]}" -o "$TMP/cow-failure"
+for mode in mmap data success ptrace-mmap ptrace-data ptrace-success ptrace-none; do
+    check "$TMP/cow-$mode.log" 'cow-allocation-failure-ok' "$TMP/cow-failure" "$mode"
+done
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/signal-frame-failure.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 -Wl,--wrap=do_exit_group \
+    "${libs[@]}" -o "$TMP/signal-frame-failure"
+for mode in mmap data recover; do
+    marker=signal-frame-refusal-ok
+    if [[ "$mode" == recover ]]; then marker=signal-frame-recovery-ok; fi
+    check "$TMP/signal-$mode.log" "$marker" "$TMP/signal-frame-failure" "$mode"
+done
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/memory-upgrade.c" -Wl,--wrap=pthread_rwlock_trywrlock \
+    "${libs[@]}" -o "$TMP/memory-upgrade"
+for mode in precedence {1..11}; do
+    for prefix in '' jit-; do
+        check "$TMP/upgrade-$prefix$mode.log" 'memory-upgrade-revalidation-ok' "$TMP/memory-upgrade" "$prefix$mode"
+    done
+done
+check "$TMP/upgrade-jit-contended.log" 'memory-upgrade-revalidation-ok' "$TMP/memory-upgrade" jit-contended
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/cow-store.c" -Wl,--wrap=pthread_rwlock_trywrlock \
+    "${libs[@]}" -o "$TMP/cow-store"
+check "$TMP/cow-store.log" 'cow-store-contention-ok' "$TMP/cow-store"
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/offload-exec.c" -Wl,--wrap=native_offload_lookup_exec -Wl,--wrap=native_offload_exec \
     "${libs[@]}" -o "$TMP/offload-exec"

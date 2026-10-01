@@ -16,6 +16,14 @@ probe. A control-server authentication URL is not proof of account login or
 tunnel traffic. The default-off switch, route/notification limits and Apple-device
 gates must remain explicit in release evidence.
 
+## App configuration guard
+
+`make test-xcode-gadget-guard` runs the actual Xcode/Meson bridge with fixture
+Meson responses for fresh/reused directories and propagated configuration errors.
+Existing app targets explicitly select gadgets, disable native emission and clear
+CLI AOT images together. Apple compilation, fault-path integration, signing and
+device validation remain separate gates.
+
 ## Build gate
 
 ```sh
@@ -37,7 +45,7 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | proc mem seeks | `CC=clang make test-arm64-proc-mem-seek` | One static fixture natively and under iSH; checks `/proc/<pid>/mem` negative, wrapping, `SEEK_SET`/`SEEK_CUR` and rejected `SEEK_END` semantics. |
 | Rootfs packaging | `make test-rootfs-download` | Good archive acceptance; failed fetch/hash/architecture and malformed/missing pin preserve the prior bundle. |
 | Regular-file readiness | `CC=clang make ROOTFS_DIR=/path/to/fakefs test-arm64-poll-regular` | Native oracle and guest poll/ppoll/select/pselect, access modes/EOF/dup/directory, mixed pipe readiness, epoll semantics and actual shell read. |
-| Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection, normal-exit TLS handoff, real CLI crash-context checks and offload policy/exec guards. |
+| Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection, normal-exit TLS handoff, real CLI crash-context checks, CoW/ptrace allocation rollback, failed signal-frame termination, lazy/stack/CoW lock-upgrade revalidation and offload policy/exec guards. |
 | Procfs/exit stress | `CC=clang make test-arm64-proc-exit-race` | Actual-archive lock-order/high-PID lookup checks, native stress and two 25s guest runs with 16 forkers, six proc/ps readers, verified progress and shutdown. |
 | Release runtime | `make test-arm64-runtime-coverage` | Shell, package manager, C fixtures and language runtimes. |
 | Debug runtime | `make test-arm64-runtime-coverage-debug` | Same suite with the debug binary. |

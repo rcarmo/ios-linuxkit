@@ -56,7 +56,8 @@ EOF
     if [[ -n "$GUEST_ARCH" ]]; then
         guest_arch_opt="-Dguest_arch=$GUEST_ARCH"
     fi
-    (set -x; meson $SRCROOT --cross-file $crossfile $guest_arch_opt) || exit $?
+    (set -x; meson "$SRCROOT" --cross-file "$crossfile" $guest_arch_opt \
+        -Djit=false -Djit_emit=false -Dcli_aot=) || exit $?
     config=$(meson introspect --buildoptions)
 fi
 
@@ -77,10 +78,16 @@ if [[ -n "$ISH_KERNEL" ]]; then
 fi
 kconfig=""
 guest_arch=${GUEST_ARCH:-arm64}
+# Existing app targets have neither native fault recovery nor AOT image linkage.
+# Never inherit a recorder/native configuration from a reused build directory.
+# An eventual AOT target needs a separate, validated bridge, not an env override.
+# Change all three together: jit=false with stale cli_aot still set would fail
+# Meson's dependency check before a later option update could clear the images.
+(set -x; meson configure -Djit=false -Djit_emit=false -Dcli_aot=) || exit $?
 for var in buildtype log b_ndebug b_sanitize log_handler kernel kconfig guest_arch; do
     old_value=$(python3 -c "import sys, json; v = next(x['value'] for x in json.load(sys.stdin) if x['name'] == '$var'); print(str(v).lower() if isinstance(v, bool) else ','.join(v) if isinstance(v, list) else v)" <<< $config)
     new_value=${!var}
     if [[ $old_value != $new_value ]]; then
-        set -x; meson configure "-D$var=$new_value"
+        set -x; meson configure "-D$var=$new_value" || exit $?
     fi
 done

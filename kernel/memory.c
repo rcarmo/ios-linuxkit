@@ -742,6 +742,8 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
     extern __thread volatile sig_atomic_t in_jit;
 
     if (entry == NULL) {
+        // A reservation owns this address; a nearby stack cannot override it.
+        if (mem_find_reservation(mem, page) != NULL) goto check_reservation;
         // page does not exist
         // look to see if the next VM region is willing to grow down
         page_t p = page;
@@ -750,7 +752,7 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
             mem_next_page(mem, &p);
         if (p >= MEM_PAGES)
             goto check_reservation;
-        if (!(mem_pt(mem, p)->flags & P_GROWSDOWN))
+        if ((mem_pt(mem, p)->flags & (P_GROWSDOWN | P_WRITE)) != (P_GROWSDOWN | P_WRITE))
             goto check_reservation;
 
         // Enforce RLIMIT_STACK: don't grow stack beyond the limit.
@@ -789,9 +791,21 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
             // Already mapped by another thread
             write_wrunlock(&mem->lock);
             read_wrlock(&mem->lock);
+            entry = mem_pt(mem, page);
             goto have_entry;
         }
-        if (pt_map_nothing(mem, page, 1, P_READ | P_WRITE | P_GROWSDOWN) >= 0)
+        // Revalidate ownership after releasing the read lock: the anchor may
+        // have been removed/reprotected or a reservation installed meanwhile.
+        p = page;
+        mem_next_page(mem, &p);
+        while (p < MEM_PAGES && mem_pt(mem, p) == NULL) mem_next_page(mem, &p);
+        stack_limit = rlimit(RLIMIT_STACK_);
+        bool within_limit = stack_limit == RLIM_INFINITY_ ||
+            (uint64_t)(guard_page - page) * PAGE_SIZE <= stack_limit;
+        if (p < MEM_PAGES &&
+                (mem_pt(mem, p)->flags & (P_GROWSDOWN | P_WRITE)) == (P_GROWSDOWN | P_WRITE) &&
+                within_limit && mem_find_reservation(mem, page) == NULL &&
+                pt_map_nothing(mem, page, 1, P_READ | P_WRITE | P_GROWSDOWN) >= 0)
             mem_changed(mem);
         write_wrunlock(&mem->lock);
         read_wrlock(&mem->lock);
@@ -816,7 +830,9 @@ check_reservation: ;
             write_wrlock(&mem->lock);
         }
         entry = mem_pt(mem, page);
-        if (entry == NULL) {
+        // Never retain a reservation pointer across an unlocked interval.
+        res = mem_find_reservation(mem, page);
+        if (entry == NULL && res != NULL && (res->flags & P_RWX)) {
             if (pt_map_nothing(mem, page, 1, res->flags & ~P_GROWSDOWN) >= 0)
                 mem_changed(mem);
         }
@@ -830,43 +846,55 @@ have_entry:
         // if page is unwritable, well tough luck
         if (type != MEM_WRITE_PTRACE && !(entry->flags & P_WRITE))
             return NULL;
-        if (type == MEM_WRITE_PTRACE) {
-            // TODO: Is P_WRITE really correct? The page shouldn't be writable without ptrace.
-#if ANON_MMAP_LIMIT_PAGES > 0
-            bool was_charged = anon_page_is_charged(entry->flags);
-#endif
-            entry->flags |= P_WRITE | P_COW;
-#if ANON_MMAP_LIMIT_PAGES > 0
-            if (!was_charged && anon_page_is_charged(entry->flags))
-                atomic_fetch_add(&anon_page_count, 1);
-#endif
-        }
-        // get rid of any compiled blocks in this page
-        asbestos_invalidate_page(mem->mmu.asbestos, page);
-        // if page is cow, ~~milk~~ copy it
-        if (entry->flags & P_COW) {
-            void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
-
+        if ((entry->flags & P_COW) || type == MEM_WRITE_PTRACE) {
 #ifndef NDEBUG
             remapped = true;
 #endif
             read_wrunlock(&mem->lock);
+            // in_jit also covers gadgets: returning a synthetic fault here
+            // can replay non-restartable pre-index/writeback state. Keep the
+            // existing waiting protocol (write_wrlock itself uses try/backoff).
             write_wrlock(&mem->lock);
-            // Re-fetch entry after lock upgrade — another thread may have
-            // already resolved this CoW while we were waiting for the lock.
+            // Allocate against the current entry, not flags/backing retained
+            // across a lock upgrade. Failure must preserve flags and ownership.
             entry = mem_pt(mem, page);
-            if (entry != NULL && (entry->flags & P_COW)) {
-                void *data = (char *) entry->data->data + entry->offset;
-                memcpy(copy, data, PAGE_SIZE);
-                pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
-                mem_changed(mem);
-            } else {
-                munmap(copy, PAGE_SIZE);
+            bool failed = false;
+            if (entry != NULL && ((entry->flags & P_COW) || type == MEM_WRITE_PTRACE)) {
+                unsigned flags = entry->flags & ~P_COW;
+                if (type == MEM_WRITE_PTRACE) flags |= P_WRITE;
+                // Host PROT_NONE backing cannot be copied safely. Refuse rather
+                // than temporarily exposing shared backing or crashing the host.
+                failed = !(entry->flags & P_RWX) ||
+                    (type == MEM_WRITE && !(entry->flags & P_WRITE));
+#if ANON_MMAP_LIMIT_PAGES > 0
+                bool precharged = !anon_page_is_charged(entry->flags) &&
+                    anon_page_is_charged(flags);
+                bool reserved = !failed && precharged && anon_pages_reserve(1);
+                if (!failed && precharged && !reserved) failed = true;
+#else
+                bool precharged = false;
+#endif
+                void *copy = MAP_FAILED;
+                if (!failed) {
+                    copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+                    failed = copy == MAP_FAILED;
+                }
+                if (!failed) {
+                    memcpy(copy, (char *)entry->data->data + entry->offset, PAGE_SIZE);
+                    failed = pt_map_accounted(mem, page, 1, copy, 0, flags, precharged) < 0;
+                }
+                if (failed && copy != MAP_FAILED) munmap(copy, PAGE_SIZE);
+#if ANON_MMAP_LIMIT_PAGES > 0
+                if (failed && reserved) anon_pages_unreserve(1);
+#endif
             }
             write_wrunlock(&mem->lock);
             read_wrlock(&mem->lock);
+            if (failed) return NULL;
         }
+        // Also invalidate ordinary writes to already-writable backing.
+        asbestos_invalidate_page(mem->mmu.asbestos, page);
     }
 
     void *ptr = mem_ptr_nofault(mem, addr, type);

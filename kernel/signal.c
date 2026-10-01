@@ -587,7 +587,10 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
     // install frame
     if (user_write(sp, &frame, frame_size)) {
         printk("failed to install frame for %d at %#x\n", info->sig, sp);
-        deliver_signal(current, SIGSEGV_, SIGINFO_NIL);
+        // receive_signals holds sighand->lock. Recursive delivery deadlocks and
+        // cannot make an unavailable stack usable. Terminate after unlocking.
+        unlock(&current->sighand->lock);
+        do_exit_group(SIGSEGV_);
     }
 
 #if defined(GUEST_ARM64)
