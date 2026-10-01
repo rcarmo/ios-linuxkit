@@ -133,6 +133,8 @@ struct task {
     // for a host-native process instead of running emulated code.
     pid_t native_pid;
     bool is_native_proxy;
+    // Caller-owned cooperative token, published only under sighand->lock.
+    struct native_cancel *native_cancel;
 
     // current condition/lock, so it can be notified in case of a signal
     cond_t *waiting_cond;

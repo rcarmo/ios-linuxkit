@@ -30,6 +30,23 @@ BUILD_DIR=$(dirname "$ISH_BIN")
 HOST_DEFS=(-DGUEST_ARM64=1 -DENGINE_ASBESTOS=1)
 if grep -q -- "-DISH_JIT=1" "$BUILD_DIR/compile_commands.json"; then HOST_DEFS+=(-DISH_JIT=1); fi
 libs=(-Wl,--start-group "$BUILD_DIR/libish.a" "$BUILD_DIR/libish_emu.a" "$BUILD_DIR/libfakefs.a" -Wl,--end-group -lrt -lm -ldl -lsqlite3)
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/offload-cancel.c" -Wl,--wrap=pthread_mutex_lock "${libs[@]}" -o "$TMP/offload-cancel"
+check "$TMP/offload-cancel.log" 'native-cancel-lifecycle-ok races=1000' "$TMP/offload-cancel"
+# Linux fixture compiles the actual portable Apple handler path, not spawn or SDK code.
+"$CC" -O2 "${HOST_DEFS[@]}" -DISH_NATIVE_OFFLOAD_TEST_HANDLERS=1 \
+    -I"$PROJECT" -I"$BUILD_DIR" -pthread -c "$PROJECT/kernel/native_offload.c" -o "$TMP/offload-handler.o"
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/offload-handler.c" "$TMP/offload-handler.o" -Wl,--wrap=do_exit \
+    "${libs[@]}" -o "$TMP/offload-handler"
+for mode in normal cancel kill pending output drain busy exiting; do
+    check "$TMP/offload-handler-$mode.log" 'native-cooperative-handler-ok' "$TMP/offload-handler" "$mode"
+done
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/fakeffmpeg-cancel.c" -Wl,--wrap=usleep -Wl,--wrap=read "${libs[@]}" -o "$TMP/fakeffmpeg-cancel"
+for mode in normal cancel copy; do
+    check "$TMP/fakeffmpeg-$mode.log" 'fakeffmpeg-cooperative-test-ok' "$TMP/fakeffmpeg-cancel" "$mode"
+done
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/task-start.c" -Wl,--wrap=pthread_create "${libs[@]}" -o "$TMP/task-start"
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \

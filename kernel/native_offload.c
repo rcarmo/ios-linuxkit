@@ -43,7 +43,14 @@
 #undef ISH_INTERNAL
 #endif
 
-#if !__APPLE__
+// Linux fixture compiles the real portable handler path without Apple spawn.
+#if !defined(__APPLE__) && !defined(ISH_NATIVE_OFFLOAD_TEST_HANDLERS)
+int native_offload_add_handler(const char *name, native_handler_func handler) {
+    (void)name; (void)handler; return -1;
+}
+int native_offload_add_cooperative_handler(const char *name, native_cooperative_handler_func handler) {
+    (void)name; (void)handler; return -1;
+}
 int native_offload_add(const char *spec) { (void)spec; return -1; }
 const char *native_offload_lookup_exec(const char *guest_path, const char *envp, bool *generic_out) {
     (void)guest_path; (void)envp;
@@ -68,7 +75,8 @@ bool native_offload_forward_signal(struct task *task, int sig) {
 struct offload_entry {
     char *guest_name;
     char *native_path;           // NULL if using handler
-    native_handler_func handler; // non-NULL for in-process execution
+    native_handler_func handler; // legacy in-process execution
+    native_cooperative_handler_func cooperative;
 };
 
 static struct offload_entry offload_entries[NATIVE_OFFLOAD_MAX];
@@ -163,6 +171,17 @@ int native_offload_add_handler(const char *guest_name, native_handler_func handl
     e->native_path = NULL;
     e->handler = handler;
     fprintf(stderr, "native_offload: %s → [builtin]\n", guest_name);
+    return 0;
+}
+
+int native_offload_add_cooperative_handler(const char *name,
+        native_cooperative_handler_func handler) {
+    if (!name || !*name || !handler || offload_count >= NATIVE_OFFLOAD_MAX) return -1;
+    char *copy = strdup(name);
+    if (!copy) return -1;
+    offload_entries[offload_count++] = (struct offload_entry) {
+        .guest_name = copy, .cooperative = handler,
+    };
     return 0;
 }
 
@@ -564,9 +583,23 @@ static void apply_exec_semantics(const char *guest_file) {
 
 // --- In-process handler execution (works on both macOS and iOS) ---
 
-static int exec_handler(native_handler_func handler, const char *guest_file,
+static int exec_handler(struct offload_entry *entry, const char *guest_file,
                         size_t argc, const char *argv, const char *envp) {
     (void)envp;
+    if (entry->cooperative) {
+        // Existing guest exec does not retire sibling threads. A sibling's
+        // exit_group timeout can detach sighand/resources of a blocked native
+        // handler; do not admit that unsupported ownership combination.
+        lock(&pids_lock);
+        lock(&current->group->lock);
+        bool alone = !current->group->doing_group_exit;
+        struct task *peer;
+        list_for_each_entry(&current->group->threads, peer, group_links)
+            if (peer != current) alone = false;
+        unlock(&current->group->lock);
+        unlock(&pids_lock);
+        if (!alone) return _EBUSY;
+    }
     const char *root_source = get_root_source();
 
     // Build argc/argv for the handler, translating guest paths to host paths.
@@ -641,8 +674,19 @@ static int exec_handler(native_handler_func handler, const char *guest_file,
         free(host_cwd);
     }
 
-    // Call the handler in-process
-    int ret = handler((int)argc, handler_argv, handler_stdin, handler_stdout, handler_stderr);
+    // Keep the token published through output/resource cleanup: cancellation
+    // during drain still determines status. Already-pending cancellation skips work.
+    struct native_cancel cancel;
+    bool cooperative = entry->cooperative != NULL;
+    int ret;
+    if (cooperative) {
+        bool started = native_cancel_begin(current, &cancel);
+        assert(started);
+        ret = native_cancel_signal(&cancel) ? 0 : entry->cooperative((int)argc,
+            handler_argv, handler_stdin, handler_stdout, handler_stderr, &cancel);
+    } else {
+        ret = entry->handler((int)argc, handler_argv, handler_stdin, handler_stdout, handler_stderr);
+    }
 
     // Close write ends so forwarding threads see EOF
     if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
@@ -661,10 +705,14 @@ static int exec_handler(native_handler_func handler, const char *guest_file,
 
     native_free_string_array(handler_argv);
 
-    int exit_code = ret << 8;
+    int exit_code = (ret & 0xff) << 8;
     printk("native_offload: [builtin] %s exited with code %d\n", guest_file, ret);
 
     register_new_files(argc, argv);
+    if (cooperative) {
+        int sig = native_cancel_finish(current, &cancel);
+        if (sig) exit_code = sig;
+    }
     do_exit(exit_code);
     __builtin_unreachable();
 }
@@ -810,8 +858,8 @@ int native_offload_exec(const char *native_path,
                         const char *envp) {
     // Check for in-process handler first (works on iOS and macOS)
     struct offload_entry *entry = offload_find(guest_file);
-    if (entry && entry->handler)
-        return exec_handler(entry->handler, guest_file, argc, argv, envp);
+    if (entry && (entry->handler || entry->cooperative))
+        return exec_handler(entry, guest_file, argc, argv, envp);
 
 #ifdef HAS_POSIX_SPAWN
     // posix_spawn path (macOS only, native_path must be valid)
@@ -825,4 +873,4 @@ int native_offload_exec(const char *native_path,
 #endif
 }
 
-#endif // __APPLE__
+#endif // Apple or explicit handler-path fixture

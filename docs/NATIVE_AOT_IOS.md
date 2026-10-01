@@ -8,7 +8,11 @@ built or tested on a device in this project.
 Use this procedure on an Apple Silicon Mac after reproducing the
 [Linux AOT build](NATIVE_AOT_BUILD_PLAN.md). Keep the existing gadget-only schemes
 available throughout the work. Source release 2.3.1 includes the handoff tools;
-it leaves the app's execution settings unchanged.
+it leaves the app's execution settings unchanged. On the isolated memory-policy
+prototype, the existing Xcode bridge now explicitly enforces gadgets/no emission,
+including reused Meson directories. The [app/cancellation audit](reports/audits/APP_AOT_CANCELLATION_2026-10-01.md)
+records that guard and the host-only cooperative-handler tests; it does not add
+an accelerated app scheme.
 
 ## Inputs and tools
 
@@ -60,7 +64,9 @@ app linkage do not exist yet.
 
 1. Create a separate AOT scheme/configuration. Keep the reference schemes on
    gadgets. In `app/xcode-meson.sh`, configure that build with `jit=true` and
-   **`jit_emit=false`**. Use separate Meson build directories.
+   **`jit_emit=false`**. Use separate Meson build directories. On the prototype,
+   the existing bridge deliberately resets native options to gadgets; implement
+   a separate validated AOT bridge instead of relying on environment overrides.
 2. Apply matching `ISH_JIT` and guest/frame definitions to every app and library
    translation unit using shared structures. Compare compiler flags, structure
    offsets, pinned registers, entry/prologue and TLB/context constants.

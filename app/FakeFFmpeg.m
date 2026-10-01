@@ -14,7 +14,8 @@
 #include "kernel/native_offload.h"
 
 static int fake_ffmpeg_main(int argc, char **argv,
-                            int stdin_fd, int stdout_fd, int stderr_fd) {
+                            int stdin_fd, int stdout_fd, int stderr_fd,
+                            const struct native_cancel *cancel) {
     (void)stdin_fd;
     const char *input_path = NULL;
     const char *output_path = NULL;
@@ -92,9 +93,14 @@ static int fake_ffmpeg_main(int argc, char **argv,
     dprintf(stdout_fd, " ...\n");
     dprintf(stdout_fd, "[output] %s\n", output_path);
 
-    // Simulate encoding progress (10 lines, 1 per second)
+    // Test handler cooperates at <=100 ms sleep intervals; file I/O remains
+    // ordinary blocking I/O, not a general deadline guarantee.
     for (int i = 1; i <= 10; i++) {
-        usleep(1000000); // 1 second
+        for (int tick = 0; tick < 10; tick++) {
+            if (native_cancel_signal(cancel)) { close(in_fd); return 1; }
+            usleep(100000);
+        }
+        if (native_cancel_signal(cancel)) { close(in_fd); return 1; }
         int pct = i * 10;
         double time_s = (double)i / 10.0 * ((double)input_size / 1000000.0);
         dprintf(stderr_fd,
@@ -105,6 +111,7 @@ static int fake_ffmpeg_main(int argc, char **argv,
     }
 
     // Copy input to output (simulating "transcoding")
+    if (native_cancel_signal(cancel)) { close(in_fd); return 1; }
     lseek(in_fd, 0, SEEK_SET);
     int out_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (out_fd < 0) {
@@ -117,11 +124,13 @@ static int fake_ffmpeg_main(int argc, char **argv,
     ssize_t n;
     off_t copied = 0;
     while ((n = read(in_fd, buf, sizeof(buf))) > 0) {
+        if (native_cancel_signal(cancel)) { close(in_fd); close(out_fd); return 1; }
         ssize_t w = 0;
         while (w < n) {
+            if (native_cancel_signal(cancel)) { close(in_fd); close(out_fd); return 1; }
             ssize_t ret = write(out_fd, buf + w, n - w);
-            if (ret < 0) {
-                if (errno == EINTR) continue;
+            if (ret <= 0) {
+                if (ret < 0 && errno == EINTR) continue;
                 dprintf(stderr_fd, "fake_ffmpeg: write error: %s\n", strerror(errno));
                 close(in_fd);
                 close(out_fd);
@@ -134,6 +143,7 @@ static int fake_ffmpeg_main(int argc, char **argv,
 
     close(in_fd);
     close(out_fd);
+    if (n < 0 || native_cancel_signal(cancel)) return 1;
 
     // Completion summary to stderr (like real ffmpeg)
     dprintf(stderr_fd, "video:%lldKiB audio:%lldKiB subtitle:0KiB global headers:0KiB "
@@ -149,7 +159,7 @@ static int fake_ffmpeg_main(int argc, char **argv,
 }
 
 void native_builtins_init(void) {
-    native_offload_add_handler("ffmpeg", fake_ffmpeg_main);
+    native_offload_add_cooperative_handler("ffmpeg", fake_ffmpeg_main);
 }
 
 #endif // ISH_FFMPEG_TEST

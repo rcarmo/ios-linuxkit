@@ -2,6 +2,7 @@
 #define NATIVE_OFFLOAD_H
 
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <sys/types.h>
 #include <signal.h>
 struct task;
@@ -62,6 +63,27 @@ typedef int (*native_handler_func)(int argc, char **argv,
 // instead of emulating the binary. Takes priority over host binary lookup.
 // Returns 0 on success, -1 if registry is full.
 int native_offload_add_handler(const char *guest_name, native_handler_func handler);
+
+// Opt-in cooperative handlers must poll at bounded intervals, interrupt their
+// own blocking I/O, close resources and join token-using workers before return.
+// No pthread_cancel or host signal is delivered to an in-process handler.
+// Cooperative exec requires a single-thread guest group not already exiting.
+// Registration is startup-only. This is not full guest signal/process semantics.
+struct native_cancel {
+    atomic_int signal; // read through native_cancel_signal(); sticky, KILL wins
+};
+typedef int (*native_cooperative_handler_func)(int argc, char **argv,
+        int stdin_fd, int stdout_fd, int stderr_fd, const struct native_cancel *cancel);
+int native_offload_add_cooperative_handler(const char *guest_name,
+        native_cooperative_handler_func handler);
+int native_cancel_signal(const struct native_cancel *cancel);
+// Internal lifecycle: caller owns the token until finish, task lifetime is
+// protected, and sighand remains attached. Publication/withdrawal use its lock.
+bool native_cancel_begin(struct task *task, struct native_cancel *cancel);
+int native_cancel_finish(struct task *task, struct native_cancel *cancel);
+bool native_cancel_request(struct task *task, int sig);
+// Signal-queue integration; caller already holds sighand->lock.
+bool native_cancel_request_locked(struct task *task, int sig);
 
 // Register a host binary offload (macOS CLI only, uses posix_spawn).
 // spec is "name" or "name=/host/path". Returns 0 on success.

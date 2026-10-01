@@ -93,6 +93,9 @@ static int signal_action(struct sighand *sighand, int sig) {
 // duplicate as "already pending" loses a resume and wedges the GC handshake.
 #define SIGRTMIN_ 32
 static void deliver_signal_unlocked(struct task *task, int sig, struct siginfo_ info) {
+    // Check in the same locked interval as queuing. This also closes a signal
+    // arriving before begin but reaching the queue after token publication.
+    if (native_cancel_request_locked(task, sig)) return;
     if (sig < SIGRTMIN_ && sigset_has(task->pending, sig))
         return;
 
@@ -151,6 +154,9 @@ void send_signal(struct task *task, int sig, struct siginfo_ info) {
                 sig, (unsigned long long)task->cpu.pc, task->pid);
 #endif
 
+    // Cooperative in-process handlers receive only token requests, never host
+    // kill/pthread_cancel. Their cleanup must finish before guest termination.
+    if (native_cancel_request(task, sig)) return;
     // Native offload: forward signal to the host native process
     if (native_offload_forward_signal(task, sig))
         return;

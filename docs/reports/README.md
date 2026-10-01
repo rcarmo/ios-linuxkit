@@ -30,4 +30,6 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [Held-out AOT evaluation — 1 October 2026](audits/AOT_HELDOUT_2026-10-01.md) records frozen JSON/raw-deflate/search inputs, five alternating runtime-off/AOT pairs with wait4 RSS, Python regressions and a retained baseline gzip failure.
 
+[App AOT boundary and cooperative cancellation — 1 October 2026](audits/APP_AOT_CANCELLATION_2026-10-01.md) records the gadget-only Xcode guard, opt-in token ownership, signal/publication races, output-drain and FakeFFmpeg tests, and remaining Apple/production-handler gates.
+
 Use the guides in the parent directory for current build, validation and release boundaries. When citing a report, include its date, source revision, host and rootfs if the report supplies them.
