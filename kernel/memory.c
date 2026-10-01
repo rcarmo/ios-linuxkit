@@ -46,6 +46,7 @@ void mem_init(struct mem *mem) {
     mem->pgdir_used = 0;
     mem->mmap_hint = 0;
     mem->reservations = NULL;
+    mem->cluster_commits = false;
     mem->mmu.ops = &mem_mmu_ops;
     mem->mmu.asbestos = asbestos_new(&mem->mmu);
     mem->mmu.changes = 0;
@@ -618,10 +619,56 @@ int pt_map_nothing(struct mem *mem, page_t start, pages_t pages, unsigned flags)
         pt_map_accounted(mem, start, pages, memory, 0, flags | P_ANONYMOUS, true);
     // Refund both logical and sampled-budget admission on failure. Successful
     // host allocation debt remains until a later capture/measurement settles it.
-    if (charged) anon_pages_finish_ticket(&ticket, err >= 0);
     if (err < 0 && memory != MAP_FAILED)
         munmap(memory, map_size);
+    // Keep the ticket pending until unused backing has actually been released.
+    if (charged) anon_pages_finish_ticket(&ticket, err >= 0);
     return err;
+}
+
+// Keep clustering bounded to one 16 KiB-or-smaller host span. Ownership must
+// be established by the caller under the write lock; a NULL predicate never
+// fabricates neighbours. All attempts use the ticket-backed map primitive.
+int pt_map_cluster(struct mem *mem, page_t page, unsigned flags,
+        bool (*compatible)(struct mem *, page_t, void *), void *ctx,
+        pages_t *committed) {
+    if (committed) *committed = 0;
+    if (page >= MEM_PAGES) return _ENOMEM;
+    if (mem_pt(mem, page) != NULL) return _EINVAL;
+    pages_t width = real_page_size / PAGE_SIZE;
+    bool whole = mem->cluster_commits && compatible &&
+        real_page_size % PAGE_SIZE == 0 && width > 1 && width <= 4 &&
+        !(width & (width - 1));
+    page_t base = whole ? page & ~(width - 1) : page;
+    if (whole) {
+        for (page_t p = base; p < base + width; p++) {
+            if (mem_pt(mem, p) || !compatible(mem, p, ctx)) {
+                whole = false;
+                break;
+            }
+        }
+    }
+    pages_t count = whole ? width : 1;
+    int err = pt_map_nothing(mem, whole ? base : page, count, flags);
+    if (err < 0 && whole) {
+        count = 1;
+        err = pt_map_nothing(mem, page, count, flags);
+    }
+    if (err >= 0 && committed) *committed = count;
+    return err;
+}
+
+static bool reservation_cluster_ok(struct mem *mem, page_t page, void *ctx) {
+    return mem_find_reservation(mem, page) == ctx;
+}
+
+struct stack_cluster_range { page_t fault, anchor; };
+static bool stack_cluster_ok(struct mem *mem, page_t page, void *ctx) {
+    struct stack_cluster_range *range = ctx;
+    // Never grow below the requested fault or above the existing stack anchor,
+    // and never consume a lazy reservation. RLIMIT was checked for the fault.
+    return page >= range->fault && page < range->anchor &&
+        mem_find_reservation(mem, page) == NULL;
 }
 
 // Metadata flags that must be preserved across mprotect — they track
@@ -702,6 +749,7 @@ int pt_copy_on_write(struct mem *src, struct mem *dst, page_t start, page_t page
     // These will be decremented per-page when the child's mm is freed.
     atomic_fetch_add(&anon_page_count, anon_copied);
 #endif
+    dst->cluster_commits = src->cluster_commits;
     for (struct mem_reservation *r = src->reservations; r; r = r->next) {
         struct mem_reservation *copy = malloc(sizeof(struct mem_reservation));
         if (copy) {
@@ -749,6 +797,9 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
     extern __thread volatile sig_atomic_t in_jit;
 
     if (entry == NULL) {
+        // A lazy reservation owns this address even if a growsdown mapping
+        // happens to be the next materialized page above it.
+        if (mem_find_reservation(mem, page) != NULL) goto check_reservation;
         // page does not exist
         // look to see if the next VM region is willing to grow down
         page_t p = page;
@@ -798,8 +849,16 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
             read_wrlock(&mem->lock);
             goto have_entry;
         }
-        if (pt_map_nothing(mem, page, 1, P_READ | P_WRITE | P_GROWSDOWN) >= 0)
-            mem_changed(mem);
+        // The anchor/reservations may have changed while upgrading the lock.
+        p = page;
+        mem_next_page(mem, &p);
+        while (p < MEM_PAGES && mem_pt(mem, p) == NULL) mem_next_page(mem, &p);
+        if (p < MEM_PAGES && (mem_pt(mem, p)->flags & P_GROWSDOWN) &&
+                mem_find_reservation(mem, page) == NULL) {
+            struct stack_cluster_range range = {page, p};
+            pt_map_cluster(mem, page, P_READ | P_WRITE | P_GROWSDOWN,
+                stack_cluster_ok, &range, NULL);
+        }
         write_wrunlock(&mem->lock);
         read_wrlock(&mem->lock);
 
@@ -823,9 +882,12 @@ check_reservation: ;
             write_wrlock(&mem->lock);
         }
         entry = mem_pt(mem, page);
-        if (entry == NULL) {
-            if (pt_map_nothing(mem, page, 1, res->flags & ~P_GROWSDOWN) >= 0)
-                mem_changed(mem);
+        // Do not dereference a reservation retained across the lock upgrade:
+        // munmap/mprotect can split, free or replace it in that interval.
+        res = mem_find_reservation(mem, page);
+        if (entry == NULL && res != NULL && (res->flags & P_RWX)) {
+            pt_map_cluster(mem, page, res->flags & ~P_GROWSDOWN,
+                reservation_cluster_ok, res, NULL);
         }
         write_wrunlock(&mem->lock);
         read_wrlock(&mem->lock);

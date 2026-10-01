@@ -47,6 +47,8 @@ struct mem {
     page_t mmap_hint;
 
     struct mem_reservation *reservations;
+    // Internal prototype switch, off by default; no app/CLI activation.
+    bool cluster_commits;
 
     wrlock_t lock;
     lock_t cow_lock;
@@ -137,6 +139,11 @@ int mem_set_reservation_flags(struct mem *mem, page_t start, pages_t pages, unsi
 int pt_map(struct mem *mem, page_t start, pages_t pages, void *memory, size_t offset, unsigned flags);
 // Map empty space into fake memory
 int pt_map_nothing(struct mem *mem, page_t page, pages_t pages, unsigned flags);
+// Caller holds the write lock. Whole spans require an ownership predicate;
+// disabled, incompatible or failed clusters retry only the faulting page.
+int pt_map_cluster(struct mem *mem, page_t page, unsigned flags,
+        bool (*compatible)(struct mem *, page_t, void *), void *ctx,
+        pages_t *committed);
 // Unmap fake memory, return -1 if any part of the range isn't mapped and 0 otherwise
 int pt_unmap(struct mem *mem, page_t start, pages_t pages);
 // like pt_unmap but doesn't care if part of the range isn't mapped

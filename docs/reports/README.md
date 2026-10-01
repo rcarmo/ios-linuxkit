@@ -26,4 +26,6 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [Real-code clustering span probe — 30 September 2026](audits/REAL_CLUSTER_SPAN_PROBE_2026-09-30.md) records actual upstream allocation/ownership tests under synthetic 4/16 KiB spans and release/debug data-object failure leaks; it is not Apple validation or a clustering import.
 
+[Bounded local clustering port — 1 October 2026](audits/LOCAL_CLUSTER_PORT_2026-10-01.md) records the default-off explicit-ticket port, synthetic-span ownership/race/GPF gates and linked no-emitter compatibility; Apple/device validation remains outstanding.
+
 Use the guides in the parent directory for current build, validation and release boundaries. When citing a report, include its date, source revision, host and rootfs if the report supplies them.

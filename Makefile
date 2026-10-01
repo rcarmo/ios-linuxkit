@@ -40,6 +40,7 @@ help:
 	@echo "  make test-arm64-proc-exit-race     Run full procfs/exit stress with verified worker shutdown"
 	@echo "  make test-arm64-load64-fault-pc    Run precise-PC load/retry regression gate"
 	@echo "  make test-arm64-upstream          Run imported correctness, lifetime and failure-injection gates"
+	@echo "  make test-arm64-cluster           Run actual-kernel synthetic 4/16 KiB clustering gates"
 	@echo "  make test-arm64-internal-continue-fixtures"
 	@echo "                                      Run opt-in ARM64 internal-continue first-call-site fixtures"
 	@echo "  make test-arm64-cli-corner-smoke   Run optional CLI/TUI/network/container corner-case smoke tests"
@@ -221,6 +222,10 @@ test-arm64-netlink: build-arm64-linux
 	@test -n "$(NETLINK_REALFS)" || { echo 'set NETLINK_REALFS to a disposable realfs root' >&2; exit 2; }
 	CC_GUEST="$(if $(CC_GUEST),$(CC_GUEST),aarch64-linux-musl-gcc)" \
 	./tests/regress/run_netlink.sh "$(abspath $(RELEASE_BUILD_DIR))/ish" "$(NETLINK_REALFS)"
+
+.PHONY: test-arm64-cluster
+test-arm64-cluster:
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" CC="$(CC)" bash tests/arm64/upstream/run-cluster.sh
 
 .PHONY: test-arm64-upstream
 test-arm64-upstream: build-arm64-linux

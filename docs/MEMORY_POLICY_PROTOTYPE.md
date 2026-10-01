@@ -110,7 +110,9 @@ These tests do not run a host pressure sampler or validate Apple memory APIs.
 - No special stack-growth/signal-recovery escape while braked. Ordinary writes
   refuse and retry after a fresh feed; failed signal-frame writes terminate the
   guest. There is no emergency allocator or guarantee of continued guest service.
-- No 16 KiB allocation clustering or Darwin protection tests,
+- A [bounded clustering port](reports/audits/LOCAL_CLUSTER_PORT_2026-10-01.md)
+  now exists on this prototype, disabled per address space by default. Actual
+  ownership/failure tests use synthetic 4/16 KiB spans. No Darwin protection,
   footprint measurements or jetsam/device proof.
 - No AOT memory/performance claim. Held-out workloads remain separate future work.
 

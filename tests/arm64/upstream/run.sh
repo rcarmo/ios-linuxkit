@@ -47,6 +47,7 @@ lifecycle_marker() {
     "$HERE/anon-accounting.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 -Wl,--wrap=mprotect \
     "${libs[@]}" -o "$TMP/anon-accounting"
 check "$TMP/anon-accounting.log" 'anon-accounting-actual-kernel-ok' "$TMP/anon-accounting"
+BUILD_DIR="$BUILD_DIR" EVIDENCE_DIR="$TMP/cluster" CC="$CC" bash "$HERE/run-cluster.sh"
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/cow-failure.c" -Wl,--wrap=malloc -Wl,--wrap=mmap64 \
     "${libs[@]}" -o "$TMP/cow-failure"
