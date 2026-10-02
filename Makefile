@@ -240,7 +240,11 @@ test-arm64-upstream: build-arm64-linux
 	ROOTFS="$(DEBIAN_ROOTFS_DIR)" \
 	./tests/arm64/upstream/run.sh
 
-.PHONY: test-arm64-offload-setup test-arm64-native-fs test-arm64-offload-context test-arm64-offload-io
+.PHONY: test-arm64-offload-setup test-arm64-native-fs test-arm64-offload-context test-arm64-offload-io test-arm64-offload-local-copy
+test-arm64-offload-local-copy: build-arm64-linux
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" CC="$(CC)" \
+	bash tests/arm64/upstream/run-offload-local-copy.sh
+
 test-arm64-offload-setup: build-arm64-linux
 	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" CC="$(CC)" \
 	bash tests/arm64/upstream/run-offload-setup.sh

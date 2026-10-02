@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -86,10 +87,16 @@ static dev_t_ realfs_devnum_for_path(const char *path) {
 
 struct fd *realfs_open(struct mount *mount, const char *path, int flags, int mode) {
     int real_flags = open_flags_real_from_fake(flags);
-    int fd_no = openat(mount->root_fd, fix_path(path), real_flags, mode);
-    if (fd_no < 0)
-        return ERR_PTR(errno_map());
+    // Allocate before O_CREAT/O_TRUNC can change the backing filesystem.
     struct fd *fd = fd_create(&realfs_fdops);
+    if (fd == NULL)
+        return ERR_PTR(_ENOMEM);
+    int fd_no = openat(mount->root_fd, fix_path(path), real_flags, mode);
+    if (fd_no < 0) {
+        int err = errno_map();
+        free(fd);
+        return ERR_PTR(err);
+    }
     fd->real_fd = fd_no;
     fd->dir = NULL;
     return fd;

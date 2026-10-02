@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
 #include <string.h>
@@ -272,11 +273,16 @@ static struct fd *fakefs_open(struct mount *mount, const char *path, int flags, 
         if (flags & O_APPEND_) real_flags |= O_APPEND;
         if (flags & O_NONBLOCK_) real_flags |= O_NONBLOCK;
         if (flags & O_NOFOLLOW_) real_flags |= O_NOFOLLOW;
+        // Reserve the descriptor before a create/truncate can have effects.
+        fd = fd_create(&realfs_fdops);
+        if (fd == NULL)
+            return ERR_PTR(_ENOMEM);
         int fd_no = open(host_abs, real_flags, 0666);
         if (fd_no < 0) {
-            return ERR_PTR(errno_map());
+            int err = errno_map();
+            free(fd);
+            return ERR_PTR(err);
         }
-        fd = fd_create(&realfs_fdops);
         fd->real_fd = fd_no;
         fd->dir = NULL;
     } else {
