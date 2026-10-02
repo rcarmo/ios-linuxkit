@@ -63,6 +63,17 @@ typedef int (*native_handler_func)(int argc, char **argv,
 // Returns 0 on success, -1 if registry is full.
 int native_offload_add_handler(const char *guest_name, native_handler_func handler);
 
+// Explicit guest filesystem context for future cooperative handlers. Owned by
+// the calling guest thread; never use it from an unregistered host worker or
+// after returning. Opens preserve guest VFS metadata/mount/path semantics and
+// return guest struct fd objects, not host paths. File I/O is not deadline-safe.
+struct native_fs_context;
+struct fd;
+struct native_fs_context *native_fs_context_create(void);
+void native_fs_context_destroy(struct native_fs_context *context);
+struct fd *native_fs_open(struct native_fs_context *context, const char *path,
+        int flags, int mode);
+
 // Register a host binary offload (macOS CLI only, uses posix_spawn).
 // spec is "name" or "name=/host/path". Returns 0 on success.
 int native_offload_add(const char *spec);

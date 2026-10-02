@@ -24,6 +24,10 @@
 // at is the file descriptor to use as a base to interpret relative paths. If
 // at is AT_PWD, uses current->pwd (with appropriate locking).
 int path_normalize(struct fd *at, const char *path, char *out, int flags);
+// Explicit retained filesystem snapshot, including root-aware symlinks/.. .
+struct fs_info;
+int path_normalize_in_fs(struct fs_info *fs, struct fd *at,
+        const char *path, char *out, int flags);
 bool path_is_normalized(const char *path);
 
 // Helper function for iterating through a normalized path.
