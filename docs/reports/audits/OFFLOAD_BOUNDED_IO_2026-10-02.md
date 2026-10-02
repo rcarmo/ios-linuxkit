@@ -5,7 +5,7 @@
 Isolated `harden/cooperative-offload`, based on v2.4.0/build817 and context
 wiring `861526f2`. No memory-policy, clustering, native emitter, app scheme or
 production handler is enabled. Existing legacy handler/spawn I/O is not made
-bounded by this tranche. Mainline remains unchanged pending selective merge.
+bounded by this tranche. The validated default-off tranche was subsequently merged as recorded below.
 
 Host: Orange Pi 6 Plus/CIX P1 (CD8180/CD8160), eight Cortex-A720 and four
 Cortex-A520 cores, 16 GB-class RAM (about 14 GiB visible), NVMe/ext4, host-native
@@ -140,8 +140,24 @@ reach exactly 1 MiB and refuse the next byte. io-strengthened.rc (2) is retained
 io-fixed-budget.rc is 0. A delegated narrow review timed out at 90 seconds;
 there is no independent-review claim.
 
+## Mainline integration
+
+Published branch commit `6c2bd5fc`, then merged the clean v2.4.0-based hardening
+branch into master at `7ccc3c92`. Its tree is byte-identical to the four-lane-tested
+candidate, with no combined prototype history, handler registration, app AOT
+activation or release/version change. New mainline Clang release/debug directories
+build successfully, and both `mainline-<mode>-{io,context}.rc` are 0. These include
+another 1,000 cancellation races per mode and realfs/fakefs concurrent execution.
+The merge remains a source change, not a signed Apple archive or source release.
+
+The first fresh mainline builds omitted explicit CC=clang. GNU Make's built-in
+CC=cc overrides the Makefile's CC ?= clang; GCC's assembler rejects the existing
+ARM64 gadget register aliases. Both `mainline-<mode>-build.rc` (2) are retained,
+not counted as passes. Fresh `build-offload-mainline-clang-<mode>` directories
+created with CC=clang pass. No compiler override is hidden in the old directory.
+
 Further work: bounded local-file handler and explicit partial-output policy;
-selective mainline integration only after broad gates; a separately tested Apple
+a separately tested Apple
 UI nonblocking admission sink. Existing app Terminal sendOutput waits for UI
 buffer space ignoring signals and must never be admitted through this API as-is.
 Regular-file/VFS operations are not magically bounded by the stream deadline.
