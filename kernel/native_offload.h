@@ -63,7 +63,7 @@ typedef int (*native_handler_func)(int argc, char **argv,
 // Returns 0 on success, -1 if registry is full.
 int native_offload_add_handler(const char *guest_name, native_handler_func handler);
 
-// Explicit guest filesystem context for future cooperative handlers. Owned by
+// Explicit guest filesystem context for cooperative handlers. Owned by
 // the calling guest thread; never use it from an unregistered host worker or
 // after returning. Opens preserve guest VFS metadata/mount/path semantics and
 // return guest struct fd objects, not host paths. File I/O is not deadline-safe.
@@ -73,6 +73,24 @@ struct native_fs_context *native_fs_context_create(void);
 void native_fs_context_destroy(struct native_fs_context *context);
 struct fd *native_fs_open(struct native_fs_context *context, const char *path,
         int flags, int mode);
+
+// Isolated cooperative execution scaffold. Register before guest execution
+// starts, at app startup only. No production handler is enabled by default.
+// Unlike the legacy contract, argv is raw guest argv, host CWD is untouched and
+// all filesystem access uses native_handler_fs(context). No host path rewriting
+// or post-hoc directory/metadata scan takes place. The context is borrowed until
+// return, guest-thread owned, and must not escape to workers. Open fds are owned
+// by the handler and must be closed before return. Stream and cancellation APIs
+// are not yet provided: this scaffold alone is NOT a cancellable I/O contract.
+// Execution refuses a multi-thread guest group or an exiting group.
+struct native_handler_context;
+typedef int (*native_cooperative_handler_func)(int argc, char **argv,
+        struct native_handler_context *context);
+int native_offload_add_cooperative_handler(const char *guest_name,
+        native_cooperative_handler_func handler);
+struct native_fs_context *native_handler_fs(struct native_handler_context *context);
+// Internal startup boundary; called before launching/running the first guest.
+void native_offload_freeze_registry(void);
 
 // Register a host binary offload (macOS CLI only, uses posix_spawn).
 // spec is "name" or "name=/host/path". Returns 0 on success.

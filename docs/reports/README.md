@@ -20,7 +20,9 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [Documentation review — 30 September 2026](audits/DOCUMENTATION_REVIEW_2026-09-30.md) records the 13-guide source/command review, technical-writing rules and validation for 2.3.1.
 
-[Offload filesystem context foundation](audits/OFFLOAD_FS_CONTEXT_2026-10-02.md) records retained guest root/CWD, VFS path/metadata semantics and realfs/fakefs concurrent tests. Cooperative execution wiring and bounded I/O remain pending.
+[Cooperative guest-context execution](audits/OFFLOAD_CONTEXT_EXEC_2026-10-02.md) wires raw guest arguments and retained VFS context into a separate dispatcher, with transactional failure injection and realfs/fakefs concurrent execution. Four-lane compatibility/procfs and frozen-AOT gates pass; bounded streams/cancellation remain pending.
+
+[Offload filesystem context foundation](audits/OFFLOAD_FS_CONTEXT_2026-10-02.md) records retained guest root/CWD, VFS path/metadata semantics and realfs/fakefs concurrent tests; the execution report above completes its wiring.
 
 [Native offload transactional setup](audits/OFFLOAD_SETUP_2026-10-02.md) records isolated v2.4.0-based setup/rollback hardening and actual-source handler/POSIX adapters. Cooperative CWD/I/O and Apple app gates remain pending.
 

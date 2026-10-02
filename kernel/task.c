@@ -6,6 +6,7 @@
 #include "kernel/calls.h"
 #include "kernel/task.h"
 #include "kernel/memory.h"
+#include "kernel/native_offload.h"
 #include "emu/tlb.h"
 #include "platform/platform.h"
 #include "fs/fd.h"
@@ -188,6 +189,7 @@ static void task_run_tlb_cleanup(void *arg) {
 }
 
 void task_run_current() {
+    native_offload_freeze_registry();
     struct cpu_state *cpu = &current->cpu;
     struct tlb *tlb = calloc(1, sizeof(struct tlb));
     if (!tlb) die("could not allocate TLB");
@@ -287,6 +289,7 @@ void task_discard_unstarted(struct task *task) {
 }
 
 int task_start(struct task *task) {
+    native_offload_freeze_registry();
     int err = pthread_create(&task->thread, &task_thread_attr, task_thread, task);
     if (err != 0)
         return err == EAGAIN ? _EAGAIN : _ENOMEM;

@@ -48,9 +48,30 @@
 #undef ISH_INTERNAL
 #endif
 
+// Startup registration is single-threaded; freeze before any guest can exec.
+static atomic_bool registry_frozen;
+void native_offload_freeze_registry(void) {
+    atomic_store_explicit(&registry_frozen, true, memory_order_release);
+}
+
+struct native_handler_context {
+    struct task *owner;
+    pthread_t thread;
+    struct native_fs_context *fs;
+};
+struct native_fs_context *native_handler_fs(struct native_handler_context *context) {
+    if (!context || current != context->owner ||
+            !pthread_equal(pthread_self(), context->thread)) return NULL;
+    return context->fs;
+}
+
 // The Linux adapter compiles the real portable path only in test fixtures.
 #if !defined(__APPLE__) && !defined(ISH_NATIVE_OFFLOAD_TEST_HANDLERS)
 int native_offload_add_handler(const char *name, native_handler_func handler) {
+    (void)name; (void)handler; return -1;
+}
+int native_offload_add_cooperative_handler(const char *name,
+        native_cooperative_handler_func handler) {
     (void)name; (void)handler; return -1;
 }
 int native_offload_add(const char *spec) { (void)spec; return -1; }
@@ -77,7 +98,8 @@ bool native_offload_forward_signal(struct task *task, int sig) {
 struct offload_entry {
     char *guest_name;
     char *native_path;           // NULL if using handler
-    native_handler_func handler; // non-NULL for in-process execution
+    native_handler_func handler; // legacy in-process execution
+    native_cooperative_handler_func cooperative;
 };
 
 static struct offload_entry offload_entries[NATIVE_OFFLOAD_MAX];
@@ -122,7 +144,8 @@ static void resolve_dylib_path(void) {
 }
 
 int native_offload_add(const char *spec) {
-    if (!spec || !*spec) return -1;
+    if (atomic_load_explicit(&registry_frozen, memory_order_acquire) ||
+            !spec || !*spec) return -1;
     if (offload_count >= NATIVE_OFFLOAD_MAX) {
         fprintf(stderr, "native_offload: too many entries (max %d)\n", NATIVE_OFFLOAD_MAX);
         return -1;
@@ -172,7 +195,8 @@ int native_offload_add(const char *spec) {
 #endif // HAS_POSIX_SPAWN
 
 int native_offload_add_handler(const char *guest_name, native_handler_func handler) {
-    if (!guest_name || !*guest_name || !handler || offload_count >= NATIVE_OFFLOAD_MAX)
+    if (atomic_load_explicit(&registry_frozen, memory_order_acquire) ||
+            !guest_name || !*guest_name || !handler || offload_count >= NATIVE_OFFLOAD_MAX)
         return -1;
     char *name = strdup(guest_name);
     if (!name) return -1;
@@ -180,6 +204,18 @@ int native_offload_add_handler(const char *guest_name, native_handler_func handl
         .guest_name = name, .handler = handler,
     };
     fprintf(stderr, "native_offload: %s → [builtin]\n", guest_name);
+    return 0;
+}
+
+int native_offload_add_cooperative_handler(const char *name,
+        native_cooperative_handler_func handler) {
+    if (atomic_load_explicit(&registry_frozen, memory_order_acquire) ||
+            !name || !*name || !handler || offload_count >= NATIVE_OFFLOAD_MAX) return -1;
+    char *copy = strdup(name);
+    if (!copy) return -1;
+    offload_entries[offload_count++] = (struct offload_entry) {
+        .guest_name = copy, .cooperative = handler,
+    };
     return 0;
 }
 
@@ -728,6 +764,48 @@ rollback:
     return err;
 }
 
+// --- Explicit guest-context execution; isolated from all legacy host paths ---
+static int exec_cooperative(native_cooperative_handler_func handler,
+        const char *guest_file, size_t argc, const char *argv) {
+    if (!handler || !guest_file || !argv || argc == 0 || argc > INT_MAX ||
+            argc > SIZE_MAX / sizeof(char *) - 1) return _EINVAL;
+    // A sibling exit_group could detach resources from an in-process caller.
+    lock(&pids_lock);
+    lock(&current->group->lock);
+    bool alone = !current->group->doing_group_exit;
+    struct task *peer;
+    list_for_each_entry(&current->group->threads, peer, group_links)
+        if (peer != current) alone = false;
+    unlock(&current->group->lock);
+    unlock(&pids_lock);
+    if (!alone) return _EBUSY;
+
+    char **args = calloc(argc + 1, sizeof(char *));
+    if (!args) return _ENOMEM;
+    int err = _ENOMEM;
+    const char *p = argv;
+    for (size_t i = 0; i < argc; i++) {
+        args[i] = strdup(p);
+        if (!args[i]) goto rollback;
+        p += strlen(p) + 1;
+    }
+    struct native_fs_context *fs = native_fs_context_create();
+    if (IS_ERR(fs)) { err = PTR_ERR(fs); goto rollback; }
+    struct native_handler_context context = {
+        .owner = current, .thread = pthread_self(), .fs = fs,
+    };
+    // All allocation/path setup completed without changing exec state.
+    apply_exec_semantics(guest_file);
+    int ret = handler((int)argc, args, &context);
+    native_fs_context_destroy(fs);
+    native_free_string_array(args);
+    do_exit((ret & 0xff) << 8);
+    __builtin_unreachable();
+rollback:
+    native_free_string_array(args);
+    return err;
+}
+
 // --- posix_spawn execution (macOS only) ---
 
 #ifdef HAS_POSIX_SPAWN
@@ -839,6 +917,8 @@ int native_offload_exec(const char *native_path,
                         const char *envp) {
     // Check for in-process handler first (works on iOS and macOS)
     struct offload_entry *entry = offload_find(guest_file);
+    if (entry && entry->cooperative)
+        return exec_cooperative(entry->cooperative, guest_file, argc, argv);
     if (entry && entry->handler)
         return exec_handler(entry->handler, guest_file, argc, argv, envp);
 
