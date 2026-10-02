@@ -20,6 +20,14 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [Documentation review — 30 September 2026](audits/DOCUMENTATION_REVIEW_2026-09-30.md) records the 13-guide source/command review, technical-writing rules and validation for 2.3.1.
 
+[Cooperative bounded streams/token isolation](audits/OFFLOAD_BOUNDED_IO_2026-10-02.md) adds restricted TCP stdio with per-call nonblocking operations, byte/deadline limits and locked signal/fork isolation. It does not admit arbitrary TTY/file/pipe I/O or enable an app handler.
+
+[Cooperative guest-context execution](audits/OFFLOAD_CONTEXT_EXEC_2026-10-02.md) wires raw guest arguments and retained VFS context into a separate dispatcher, with transactional failure injection and realfs/fakefs concurrent execution. Four-lane compatibility/procfs and frozen-AOT gates pass; the later stream report above follows it.
+
+[Offload filesystem context foundation](audits/OFFLOAD_FS_CONTEXT_2026-10-02.md) records retained guest root/CWD, VFS path/metadata semantics and realfs/fakefs concurrent tests; the execution report above completes its wiring.
+
+[Native offload transactional setup](audits/OFFLOAD_SETUP_2026-10-02.md) records isolated v2.4.0-based setup/rollback hardening and actual-source handler/POSIX adapters. Cooperative CWD/I/O and Apple app gates remain pending.
+
 [Safety minor release](releases/IOS_LINUXKIT_2.4.0.md) extracts unconditional CoW/ptrace rollback, signal-frame failure termination, reservation/stack revalidation and the gadget-only Xcode guard. Prototype admission, clustering, cooperative offload and app AOT remain excluded.
 
 [Scalar saturation/gzip patch release](releases/IOS_LINUXKIT_2.3.3.md) repairs missing scalar saturating add/subtract used by BusyBox gzip, with full-result/QC and compression/file-cleanup regressions. No memory-policy, native-offload or app AOT prototype is merged.

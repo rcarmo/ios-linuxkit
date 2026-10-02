@@ -31,7 +31,8 @@ bool contains_mount_point(const char *path) {
     return false;
 }
 
-struct fd *generic_openat(struct fd *at, const char *path_raw, int flags, int mode) {
+static struct fd *generic_openat_impl(struct fs_info *fs, struct fd *at,
+        const char *path_raw, int flags, int mode) {
     if (flags & O_RDWR_ && flags & O_WRONLY_)
         return ERR_PTR(_EINVAL);
 
@@ -41,9 +42,10 @@ struct fd *generic_openat(struct fd *at, const char *path_raw, int flags, int mo
     // host open(): path_normalize resolves the final component itself, so by
     // the time the fs open() runs the symlink is already gone. Leaving it
     // unresolved makes the S_ISLNK check below return ELOOP, as Linux does.
-    int err = path_normalize(at, path_raw, path,
-            (flags & O_NOFOLLOW_ ? N_SYMLINK_NOFOLLOW : N_SYMLINK_FOLLOW) |
-            (flags & O_CREAT_ ? N_PARENT_DIR_WRITE : 0));
+    int normalize_flags = (flags & O_NOFOLLOW_ ? N_SYMLINK_NOFOLLOW : N_SYMLINK_FOLLOW) |
+        (flags & O_CREAT_ ? N_PARENT_DIR_WRITE : 0);
+    int err = fs ? path_normalize_in_fs(fs, at, path_raw, path, normalize_flags) :
+        path_normalize(at, path_raw, path, normalize_flags);
     if (err < 0)
         return ERR_PTR(err);
     struct mount *mount = find_mount_and_trim_path(path);
@@ -113,6 +115,14 @@ struct fd *generic_openat(struct fd *at, const char *path_raw, int flags, int mo
 error:
     fd_close(fd);
     return ERR_PTR(err);
+}
+
+struct fd *generic_openat(struct fd *at, const char *path, int flags, int mode) {
+    return generic_openat_impl(NULL, at, path, flags, mode);
+}
+
+struct fd *generic_open_in_fs(struct fs_info *fs, const char *path, int flags, int mode) {
+    return generic_openat_impl(fs, AT_PWD, path, flags, mode);
 }
 
 struct fd *generic_open(const char *path, int flags, int mode) {

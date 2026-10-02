@@ -27,10 +27,16 @@
 #define HAS_POSIX_SPAWN 1
 #endif
 #endif
+#if defined(ISH_NATIVE_OFFLOAD_TEST_SPAWN) && !defined(__APPLE__)
+#include <spawn.h>
+#define HAS_POSIX_SPAWN 1
+#define posix_spawn_file_actions_addchdir posix_spawn_file_actions_addchdir_np
+#endif
 
 #include "kernel/calls.h"
 #include "kernel/task.h"
 #include "kernel/native_offload.h"
+#include "kernel/native_offload_internal.h"
 #include "kernel/native_offload_policy.h"
 #include "kernel/fs.h"
 #include "fs/fd.h"
@@ -43,7 +49,21 @@
 #undef ISH_INTERNAL
 #endif
 
-#if !__APPLE__
+// Startup registration is single-threaded; freeze before any guest can exec.
+static atomic_bool registry_frozen;
+void native_offload_freeze_registry(void) {
+    atomic_store_explicit(&registry_frozen, true, memory_order_release);
+}
+
+// The Linux adapter compiles the real portable path only in test fixtures.
+#if !defined(__APPLE__) && !defined(ISH_NATIVE_OFFLOAD_TEST_HANDLERS)
+int native_offload_add_handler(const char *name, native_handler_func handler) {
+    (void)name; (void)handler; return -1;
+}
+int native_offload_add_cooperative_handler(const char *name,
+        native_cooperative_handler_func handler) {
+    (void)name; (void)handler; return -1;
+}
 int native_offload_add(const char *spec) { (void)spec; return -1; }
 const char *native_offload_lookup_exec(const char *guest_path, const char *envp, bool *generic_out) {
     (void)guest_path; (void)envp;
@@ -68,7 +88,8 @@ bool native_offload_forward_signal(struct task *task, int sig) {
 struct offload_entry {
     char *guest_name;
     char *native_path;           // NULL if using handler
-    native_handler_func handler; // non-NULL for in-process execution
+    native_handler_func handler; // legacy in-process execution
+    native_cooperative_handler_func cooperative;
 };
 
 static struct offload_entry offload_entries[NATIVE_OFFLOAD_MAX];
@@ -94,6 +115,7 @@ static char *auto_detect_host_path(const char *name) {
 
 // Find the redirect dylib next to the ish binary
 static void resolve_dylib_path(void) {
+#ifdef __APPLE__
     char exe[PATH_MAX];
     uint32_t size = sizeof(exe);
     if (_NSGetExecutablePath(exe, &size) != 0)
@@ -108,9 +130,12 @@ static void resolve_dylib_path(void) {
     else
         fprintf(stderr, "native_offload: warning: %s not found, path redirection disabled\n",
                 dylib_path);
+#endif // Apple executable discovery is not modelled by the Linux spawn fixture.
 }
 
 int native_offload_add(const char *spec) {
+    if (atomic_load_explicit(&registry_frozen, memory_order_acquire) ||
+            !spec || !*spec) return -1;
     if (offload_count >= NATIVE_OFFLOAD_MAX) {
         fprintf(stderr, "native_offload: too many entries (max %d)\n", NATIVE_OFFLOAD_MAX);
         return -1;
@@ -142,6 +167,9 @@ int native_offload_add(const char *spec) {
         }
     }
 
+    if (!guest_name || !*guest_name || !native_path) {
+        free(guest_name); free(native_path); return -1;
+    }
     struct offload_entry *e = &offload_entries[offload_count++];
     e->guest_name = guest_name;
     e->native_path = native_path;
@@ -157,12 +185,27 @@ int native_offload_add(const char *spec) {
 #endif // HAS_POSIX_SPAWN
 
 int native_offload_add_handler(const char *guest_name, native_handler_func handler) {
-    if (offload_count >= NATIVE_OFFLOAD_MAX) return -1;
-    struct offload_entry *e = &offload_entries[offload_count++];
-    e->guest_name = strdup(guest_name);
-    e->native_path = NULL;
-    e->handler = handler;
+    if (atomic_load_explicit(&registry_frozen, memory_order_acquire) ||
+            !guest_name || !*guest_name || !handler || offload_count >= NATIVE_OFFLOAD_MAX)
+        return -1;
+    char *name = strdup(guest_name);
+    if (!name) return -1;
+    offload_entries[offload_count++] = (struct offload_entry) {
+        .guest_name = name, .handler = handler,
+    };
     fprintf(stderr, "native_offload: %s → [builtin]\n", guest_name);
+    return 0;
+}
+
+int native_offload_add_cooperative_handler(const char *name,
+        native_cooperative_handler_func handler) {
+    if (atomic_load_explicit(&registry_frozen, memory_order_acquire) ||
+            !name || !*name || !handler || offload_count >= NATIVE_OFFLOAD_MAX) return -1;
+    char *copy = strdup(name);
+    if (!copy) return -1;
+    offload_entries[offload_count++] = (struct offload_entry) {
+        .guest_name = copy, .cooperative = handler,
+    };
     return 0;
 }
 
@@ -246,10 +289,12 @@ static char **build_native_argv(const char *native_path, size_t argc,
     if (!argv) return NULL;
 
     argv[0] = strdup(native_path);
+    if (!argv[0]) { free(argv); return NULL; }
     const char *p = packed_argv;
     p += strlen(p) + 1; // skip guest argv[0]
     for (size_t i = 1; i < argc; i++) {
         argv[i] = strdup(p);
+        if (!argv[i]) { native_free_string_array(argv); return NULL; }
         p += strlen(p) + 1;
     }
     argv[argc] = NULL;
@@ -279,7 +324,11 @@ static char **build_native_envp(const char *packed_envp) {
         for (const char **sp = skip_prefixes; *sp; sp++) {
             if (strncmp(p, *sp, strlen(*sp)) == 0) { skip = true; break; }
         }
-        if (!skip) envp[j++] = strdup(p);
+        if (!skip) {
+            envp[j] = strdup(p);
+            if (!envp[j]) { native_free_string_array(envp); return NULL; }
+            j++;
+        }
         p += strlen(p) + 1;
     }
 
@@ -290,9 +339,13 @@ static char **build_native_envp(const char *packed_envp) {
     if (root_source && dylib_found) {
         char buf[PATH_MAX + 32];
         snprintf(buf, sizeof(buf), "DYLD_INSERT_LIBRARIES=%s", dylib_path);
-        envp[j++] = strdup(buf);
+        envp[j] = strdup(buf);
+        if (!envp[j]) { native_free_string_array(envp); return NULL; }
+        j++;
         snprintf(buf, sizeof(buf), "FAKEFS_ROOT=%s", root_source);
-        envp[j++] = strdup(buf);
+        envp[j] = strdup(buf);
+        if (!envp[j]) { native_free_string_array(envp); return NULL; }
+        j++;
     }
 
     envp[j] = NULL;
@@ -381,11 +434,11 @@ static void scan_dir_for_new_files(struct fakefs_db *fs, const char *guest_dir) 
     closedir(d);
 }
 
-// Get guest CWD path (returns static buffer or NULL)
+// Get guest CWD path (thread-local legacy scan buffer or NULL)
 static const char *get_guest_cwd(void) {
     if (!current->fs || !current->fs->pwd)
         return NULL;
-    static char guest_cwd[MAX_PATH];
+    static __thread char guest_cwd[MAX_PATH];
     int err = current->fs->pwd->mount->fs->getpath(current->fs->pwd, guest_cwd);
     if (err < 0) return NULL;
     return guest_cwd;
@@ -433,15 +486,16 @@ static void register_new_files(size_t argc, const char *packed_argv) {
 
 // --- CWD resolution ---
 
-static char *get_host_cwd(void) {
+static char *get_host_cwd(int *error) {
+    *error = _ENOENT;
     if (!current->fs || !current->fs->pwd)
         return NULL;
     char guest_cwd[MAX_PATH];
     int err = current->fs->pwd->mount->fs->getpath(current->fs->pwd, guest_cwd);
-    if (err < 0) return NULL;
+    if (err < 0) { *error = err; return NULL; }
 
     char *host_cwd = malloc(PATH_MAX);
-    if (!host_cwd) return NULL;
+    if (!host_cwd) { *error = _ENOMEM; return NULL; }
 
     // Handle empty guest cwd ("/" after stripping leading slash) by falling
     // back directly to the fakefs source — bind-mount translation is only
@@ -449,14 +503,19 @@ static char *get_host_cwd(void) {
     if (guest_cwd[0] == '\0' || (guest_cwd[0] == '/' && guest_cwd[1] == '\0')) {
         const char *root = get_root_source();
         if (!root) { free(host_cwd); return NULL; }
-        snprintf(host_cwd, PATH_MAX, "%s", root);
+        if (snprintf(host_cwd, PATH_MAX, "%s", root) >= PATH_MAX) {
+            *error = _ENAMETOOLONG; free(host_cwd); return NULL;
+        }
+        *error = 0;
         return host_cwd;
     }
 
     if (!build_host_path_for_guest(guest_cwd, host_cwd, PATH_MAX)) {
+        *error = _ENAMETOOLONG;
         free(host_cwd);
         return NULL;
     }
+    *error = 0;
     return host_cwd;
 }
 
@@ -498,8 +557,8 @@ static void *pipe_forward_thread(void *arg) {
             ssize_t written = 0;
             while (written < n) {
                 ssize_t w = write(fwd->dest_fd, buf + written, n - written);
-                if (w < 0) {
-                    if (errno == EINTR) continue;
+                if (w <= 0) {
+                    if (w < 0 && errno == EINTR) continue;
                     break;
                 }
                 written += w;
@@ -513,26 +572,78 @@ static void *pipe_forward_thread(void *arg) {
     return NULL;
 }
 
-// Start forwarding with host fd destination (macOS posix_spawn)
-static pthread_t start_pipe_forward(int pipe_rd, int dest_fd) {
+// Transfer pipe_rd ownership only on successful thread creation. The caller
+// still owns it on every failure, including a failed pthread_create.
+static int start_pipe_forward(int pipe_rd, int dest_fd, struct fd *guest_fd,
+        pthread_t *tid) {
     struct pipe_fwd *fwd = malloc(sizeof(*fwd));
-    fwd->pipe_rd = pipe_rd;
-    fwd->dest_fd = dest_fd;
-    fwd->guest_fd = NULL;
-    pthread_t tid;
-    pthread_create(&tid, NULL, pipe_forward_thread, fwd);
-    return tid;
+    if (!fwd) return _ENOMEM;
+    *fwd = (struct pipe_fwd) {
+        .pipe_rd = pipe_rd, .dest_fd = dest_fd,
+        .guest_fd = guest_fd ? fd_retain(guest_fd) : NULL,
+    };
+    int err = pthread_create(tid, NULL, pipe_forward_thread, fwd);
+    if (err) {
+        if (fwd->guest_fd) fd_close(fwd->guest_fd);
+        free(fwd);
+        errno = err; // pthread APIs return errno values rather than setting it.
+        return errno_map();
+    }
+    return 0;
 }
 
-// Start forwarding with guest fd destination (iOS handler)
-static pthread_t start_pipe_forward_guest(int pipe_rd, struct fd *guest_fd) {
-    struct pipe_fwd *fwd = malloc(sizeof(*fwd));
-    fwd->pipe_rd = pipe_rd;
-    fwd->dest_fd = -1;
-    fwd->guest_fd = fd_retain(guest_fd);
-    pthread_t tid;
-    pthread_create(&tid, NULL, pipe_forward_thread, fwd);
-    return tid;
+// Snapshot only stdio that survives exec, with references held until cleanup.
+// An undersized fdtable and CLOEXEC stdio must not become stale borrowed fds.
+static void retain_exec_stdio(struct fd *stdio[3]) {
+    lock(&current->files->lock);
+    for (unsigned i = 0; i < 3; i++) {
+        struct fd *fd = fdtable_get(current->files, i);
+        if (fd && !bit_test(i, current->files->cloexec)) stdio[i] = fd_retain(fd);
+    }
+    unlock(&current->files->lock);
+}
+
+struct offload_pipe {
+    int ends[2];
+    pthread_t thread;
+    bool started;
+};
+
+static void finish_offload_pipe(struct offload_pipe *pipe) {
+    if (pipe->ends[1] >= 0) close(pipe->ends[1]);
+    if (pipe->started) {
+        // No output was produced on a setup failure, so EOF releases the reader.
+        // Successful handlers still require a separate bounded-sink contract.
+        int err = pthread_join(pipe->thread, NULL);
+        if (err) die("native_offload: cannot join owned forwarder: %s", strerror(err));
+    } else if (pipe->ends[0] >= 0) {
+        close(pipe->ends[0]);
+    }
+    pipe->ends[0] = pipe->ends[1] = -1;
+    pipe->started = false;
+}
+
+static int prepare_offload_pipe(struct offload_pipe *out, struct fd *guest,
+        bool use_guest_ops) {
+    if (!guest) return 0;
+    if (pipe(out->ends) < 0) return errno_map();
+    for (unsigned i = 0; i < 2; i++) {
+        // Reserve stdio numbers for spawn actions, even if host 0/1/2 were
+        // closed. Internal endpoints must never survive an unrelated exec.
+        if (out->ends[i] < 3) {
+            int moved = fcntl(out->ends[i], F_DUPFD_CLOEXEC, 3);
+            if (moved < 0) return errno_map();
+            close(out->ends[i]);
+            out->ends[i] = moved;
+        } else if (fcntl(out->ends[i], F_SETFD, FD_CLOEXEC) < 0) {
+            return errno_map();
+        }
+    }
+    int err = start_pipe_forward(out->ends[0],
+        use_guest_ops ? -1 : guest->real_fd, use_guest_ops ? guest : NULL, &out->thread);
+    if (err < 0) return err;
+    out->started = true;
+    return 0;
 }
 
 // --- Exec semantics (shared by posix_spawn and in-process handler) ---
@@ -567,106 +678,142 @@ static void apply_exec_semantics(const char *guest_file) {
 static int exec_handler(native_handler_func handler, const char *guest_file,
                         size_t argc, const char *argv, const char *envp) {
     (void)envp;
+    if (!handler || !guest_file || !argv || argc == 0 || argc > INT_MAX ||
+            argc > SIZE_MAX / sizeof(char *) - 1) return _EINVAL;
     const char *root_source = get_root_source();
-
-    // Build argc/argv for the handler, translating guest paths to host paths.
-    // Unlike posix_spawn path (which uses DYLD interpose for transparent
-    // redirection), in-process handlers need explicit path translation.
     char **handler_argv = calloc(argc + 1, sizeof(char *));
     if (!handler_argv) return _ENOMEM;
-
+    struct fd *stdio[3] = {0};
+    struct offload_pipe output[2] = {
+        {.ends = {-1, -1}}, {.ends = {-1, -1}},
+    };
+    char *host_cwd = NULL;
+    int saved_cwd = -1;
+    bool cwd_changed = false;
+    int err = _ENOMEM;
     const char *p = argv;
     for (size_t i = 0; i < argc; i++) {
-        // Absolute guest path → host path, honoring bind mounts first.
-        // Skip URLs (anything containing "://") which are not filesystem paths.
         if (root_source && p[0] == '/' && !strstr(p, "://")) {
             char host_path[PATH_MAX];
-            if (build_host_path_for_guest(p, host_path, sizeof(host_path)))
-                handler_argv[i] = strdup(host_path);
-            else
-                handler_argv[i] = strdup(p);
+            if (!build_host_path_for_guest(p, host_path, sizeof(host_path))) {
+                err = _ENAMETOOLONG;
+                goto rollback;
+            }
+            handler_argv[i] = strdup(host_path);
         } else {
             handler_argv[i] = strdup(p);
         }
+        if (!handler_argv[i]) goto rollback;
         p += strlen(p) + 1;
     }
-    handler_argv[argc] = NULL;
-
-    printk("native_offload: [builtin] %s (pid %d)\n", guest_file, current->pid);
-
-    // Get guest stdio fds (retain for forwarding threads)
-    struct fd *guest_stdin = NULL, *guest_stdout = NULL, *guest_stderr = NULL;
-    lock(&current->files->lock);
-    if (current->files->files[0]) guest_stdin  = fd_retain(current->files->files[0]);
-    if (current->files->files[1]) guest_stdout = fd_retain(current->files->files[1]);
-    if (current->files->files[2]) guest_stderr = fd_retain(current->files->files[2]);
-    unlock(&current->files->lock);
-
-    // Create pipes: handler writes to pipe write-end, forwarding thread reads
-    // from pipe read-end and writes through guest fd ops (TTY driver on iOS).
-    int stdout_pipe[2] = {-1, -1}, stderr_pipe[2] = {-1, -1};
-    int handler_stdin = -1, handler_stdout = -1, handler_stderr = -1;
-
-    if (guest_stdin && guest_stdin->real_fd >= 0)
-        handler_stdin = guest_stdin->real_fd;
-
-    if (guest_stdout && pipe(stdout_pipe) == 0)
-        handler_stdout = stdout_pipe[1];
-    else
-        stdout_pipe[0] = stdout_pipe[1] = -1;
-
-    if (guest_stderr && pipe(stderr_pipe) == 0)
-        handler_stderr = stderr_pipe[1];
-    else
-        stderr_pipe[0] = stderr_pipe[1] = -1;
-
-    apply_exec_semantics(guest_file);
-
-    // Start pipe forwarding threads — write through guest fd ops
-    // so data reaches iOS Terminal UI (via TTY driver)
-    pthread_t stdout_tid = 0, stderr_tid = 0;
-    if (stdout_pipe[0] >= 0 && guest_stdout)
-        stdout_tid = start_pipe_forward_guest(stdout_pipe[0], guest_stdout);
-    if (stderr_pipe[0] >= 0 && guest_stderr)
-        stderr_tid = start_pipe_forward_guest(stderr_pipe[0], guest_stderr);
-
-    // Resolve host paths for handler: it may need to read/write files
-    // in the fakefs data directory. Set cwd to host CWD.
-    char *host_cwd = get_host_cwd();
-    char saved_cwd[PATH_MAX];
-    bool cwd_changed = false;
-    if (host_cwd) {
-        if (getcwd(saved_cwd, sizeof(saved_cwd)) && chdir(host_cwd) == 0)
-            cwd_changed = true;
-        free(host_cwd);
+    // Resolve legacy CWD before starting workers/committing exec. Explicit
+    // per-handler filesystem context will replace chdir for cooperative callers.
+    if (current->fs && current->fs->pwd) {
+        host_cwd = get_host_cwd(&err);
+        if (!host_cwd) goto rollback;
+        saved_cwd = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (saved_cwd < 0) { err = errno_map(); goto rollback; }
     }
-
-    // Call the handler in-process
-    int ret = handler((int)argc, handler_argv, handler_stdin, handler_stdout, handler_stderr);
-
-    // Close write ends so forwarding threads see EOF
-    if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
-    if (stderr_pipe[1] >= 0) close(stderr_pipe[1]);
-    if (stdout_tid) pthread_join(stdout_tid, NULL);
-    if (stderr_tid) pthread_join(stderr_tid, NULL);
-
-    // Restore cwd
-    if (cwd_changed)
-        (void)chdir(saved_cwd);
-
-    // Release guest fd references (forwarding threads already released theirs)
-    if (guest_stdin) fd_close(guest_stdin);
-    if (guest_stdout) fd_close(guest_stdout);
-    if (guest_stderr) fd_close(guest_stderr);
-
+    retain_exec_stdio(stdio);
+    if (stdio[1] && !stdio[1]->ops->write) { err = _EBADF; goto rollback; }
+    if (stdio[2] && !stdio[2]->ops->write) { err = _EBADF; goto rollback; }
+    err = prepare_offload_pipe(&output[0], stdio[1], true);
+    if (err < 0) goto rollback;
+    err = prepare_offload_pipe(&output[1], stdio[2], true);
+    if (err < 0) goto rollback;
+    if (host_cwd) {
+        if (chdir(host_cwd) < 0) { err = errno_map(); goto rollback; }
+        cwd_changed = true;
+    }
+    // No fallible setup remains. CLOEXEC stdio was excluded from the snapshot.
+    apply_exec_semantics(guest_file);
+    int ret = handler((int)argc, handler_argv,
+        stdio[0] && stdio[0]->real_fd >= 0 ? stdio[0]->real_fd : -1,
+        output[0].ends[1], output[1].ends[1]);
+    finish_offload_pipe(&output[0]);
+    finish_offload_pipe(&output[1]);
+    if (cwd_changed && fchdir(saved_cwd) < 0)
+        die("native_offload: cannot restore legacy cwd: %s", strerror(errno));
+    if (saved_cwd >= 0) close(saved_cwd);
+    free(host_cwd);
+    for (unsigned i = 0; i < 3; i++) if (stdio[i]) fd_close(stdio[i]);
     native_free_string_array(handler_argv);
-
-    int exit_code = ret << 8;
-    printk("native_offload: [builtin] %s exited with code %d\n", guest_file, ret);
-
     register_new_files(argc, argv);
-    do_exit(exit_code);
+    do_exit((ret & 0xff) << 8);
     __builtin_unreachable();
+
+rollback:
+    // Forwarders have no producer yet; closing writes releases any started
+    // reader with EOF. Unstarted pipe ends and retained references stay ours.
+    finish_offload_pipe(&output[0]);
+    finish_offload_pipe(&output[1]);
+    if (saved_cwd >= 0) close(saved_cwd);
+    free(host_cwd);
+    for (unsigned i = 0; i < 3; i++) if (stdio[i]) fd_close(stdio[i]);
+    native_free_string_array(handler_argv);
+    return err;
+}
+
+// --- Explicit guest-context execution; isolated from all legacy host paths ---
+static int exec_cooperative(native_cooperative_handler_func handler,
+        const char *guest_file, size_t argc, const char *argv) {
+    if (!handler || !guest_file || !argv || argc == 0 || argc > INT_MAX ||
+            argc > SIZE_MAX / sizeof(char *) - 1) return _EINVAL;
+    // A sibling exit_group could detach resources from an in-process caller.
+    lock(&pids_lock);
+    lock(&current->group->lock);
+    bool alone = !current->group->doing_group_exit;
+    struct task *peer;
+    list_for_each_entry(&current->group->threads, peer, group_links)
+        if (peer != current) alone = false;
+    unlock(&current->group->lock);
+    unlock(&pids_lock);
+    if (!alone) return _EBUSY;
+
+    char **args = calloc(argc + 1, sizeof(char *));
+    if (!args) return _ENOMEM;
+    struct native_handler_context context = {
+        .owner = current, .thread = pthread_self(),
+    };
+    int err = _ENOMEM;
+    const char *p = argv;
+    for (size_t i = 0; i < argc; i++) {
+        args[i] = strdup(p);
+        if (!args[i]) goto rollback;
+        p += strlen(p) + 1;
+    }
+    context.fs = native_fs_context_create();
+    if (IS_ERR(context.fs)) { err = PTR_ERR(context.fs); goto rollback; }
+    retain_exec_stdio(context.stdio);
+    for (unsigned i = 0; i < 3; i++) {
+        err = native_io_admit(context.stdio[i], i != 0);
+        if (err < 0) goto rollback;
+    }
+    err = native_io_init(&context);
+    if (err < 0) goto rollback;
+    // Publish before exec action reset so ignored/blocked pending signals keep
+    // their original admission meaning. No further fallible setup remains.
+    if (!native_cancel_begin(current, &context.cancel)) { err = _EBUSY; goto rollback; }
+    apply_exec_semantics(guest_file);
+    int ret = native_handler_check(&context) ? 0 : handler((int)argc, args, &context);
+    // A callback that forgot its final checkpoint must not report success after
+    // the deadline. This still cannot preempt a callback that never returns.
+    native_handler_check(&context);
+    // Token stays published through cleanup; no forwarding workers to abandon.
+    for (unsigned i = 0; i < 3; i++) if (context.stdio[i]) fd_close(context.stdio[i]);
+    native_fs_context_destroy(context.fs);
+    native_free_string_array(args);
+    int sig = native_cancel_finish(current, &context.cancel);
+    int status = (ret & 0xff) << 8;
+    if (context.io_error && !status) status = 1 << 8;
+    if (sig) status = sig;
+    do_exit(status);
+    __builtin_unreachable();
+rollback:
+    for (unsigned i = 0; i < 3; i++) if (context.stdio[i]) fd_close(context.stdio[i]);
+    native_fs_context_destroy(context.fs);
+    native_free_string_array(args);
+    return err;
 }
 
 // --- posix_spawn execution (macOS only) ---
@@ -674,131 +821,101 @@ static int exec_handler(native_handler_func handler, const char *guest_file,
 #ifdef HAS_POSIX_SPAWN
 static int exec_posix_spawn(const char *native_path, const char *guest_file,
                             size_t argc, const char *argv, const char *envp) {
+    if (!native_path || !guest_file || !argv || !envp || argc == 0 ||
+            argc > INT_MAX || argc > SIZE_MAX / sizeof(char *) - 1) return _EINVAL;
     char **native_argv = build_native_argv(native_path, argc, argv);
-    if (!native_argv)
-        return _ENOMEM;
-
+    if (!native_argv) return _ENOMEM;
     char **native_envp = build_native_envp(envp);
-    if (!native_envp) {
-        native_free_string_array(native_argv);
-        return _ENOMEM;
-    }
-
-    printk("native_offload: exec:");
-    for (size_t i = 0; native_argv[i]; i++)
-        printk(" %s", native_argv[i]);
-    printk("\n");
-
-    // Get stdio fds
-    int stdin_fd = -1, stdout_fd = -1, stderr_fd = -1;
-    lock(&current->files->lock);
-    if (current->files->files[0]) stdin_fd  = current->files->files[0]->real_fd;
-    if (current->files->files[1]) stdout_fd = current->files->files[1]->real_fd;
-    if (current->files->files[2]) stderr_fd = current->files->files[2]->real_fd;
-    unlock(&current->files->lock);
-
-    // Pipes for stdout/stderr (\r → \n conversion)
-    int stdout_pipe[2] = {-1, -1}, stderr_pipe[2] = {-1, -1};
-    int stdout_dest = stdout_fd, stderr_dest = stderr_fd;
-
-    if (stdout_fd >= 0 && pipe(stdout_pipe) == 0) {} else stdout_pipe[0] = stdout_pipe[1] = -1;
-    if (stderr_fd >= 0 && pipe(stderr_pipe) == 0) {} else stderr_pipe[0] = stderr_pipe[1] = -1;
-
-    // posix_spawn setup
+    if (!native_envp) { native_free_string_array(native_argv); return _ENOMEM; }
+    struct fd *stdio[3] = {0};
+    struct offload_pipe output[2] = {
+        {.ends = {-1, -1}}, {.ends = {-1, -1}},
+    };
+    char *host_cwd = NULL;
     posix_spawn_file_actions_t actions;
-    posix_spawn_file_actions_init(&actions);
-    if (stdin_fd >= 0)
-        posix_spawn_file_actions_adddup2(&actions, stdin_fd, STDIN_FILENO);
-    else
-        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
-    if (stdout_pipe[1] >= 0) {
-        posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
-        posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
-    } else if (stdout_fd >= 0) {
-        posix_spawn_file_actions_adddup2(&actions, stdout_fd, STDOUT_FILENO);
-    }
-    if (stderr_pipe[1] >= 0) {
-        posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO);
-        posix_spawn_file_actions_addclose(&actions, stderr_pipe[0]);
-    } else if (stderr_fd >= 0) {
-        posix_spawn_file_actions_adddup2(&actions, stderr_fd, STDERR_FILENO);
-    }
-
     posix_spawnattr_t attrs;
-    posix_spawnattr_init(&attrs);
-
-    char *host_cwd = get_host_cwd();
-    if (host_cwd)
-        posix_spawn_file_actions_addchdir(&actions, host_cwd);
-
+    bool actions_live = false, attrs_live = false;
+    int err = _ENOMEM, host_err;
+    retain_exec_stdio(stdio);
+    if (current->fs && current->fs->pwd) {
+        host_cwd = get_host_cwd(&err);
+        if (!host_cwd) goto spawn_rollback;
+    }
+    // Refuse non-host-backed output, rather than silently redirecting it to
+    // inherited host stdio. The portable handler path serves guest-only sinks.
+    for (unsigned i = 0; i < 3; i++)
+        if (stdio[i] && stdio[i]->real_fd < 0) { err = _EBADF; goto spawn_rollback; }
+    err = prepare_offload_pipe(&output[0], stdio[1], false);
+    if (err < 0) goto spawn_rollback;
+    err = prepare_offload_pipe(&output[1], stdio[2], false);
+    if (err < 0) goto spawn_rollback;
+#define SPAWN_CHECK(call) do { \
+    host_err = (call); \
+    if (host_err) { errno = host_err; err = errno_map(); goto spawn_rollback; } \
+} while (0)
+    SPAWN_CHECK(posix_spawn_file_actions_init(&actions));
+    actions_live = true;
+    SPAWN_CHECK(posix_spawnattr_init(&attrs));
+    attrs_live = true;
+    if (stdio[0]) SPAWN_CHECK(posix_spawn_file_actions_adddup2(&actions, stdio[0]->real_fd, 0));
+    else SPAWN_CHECK(posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0));
+    for (unsigned i = 0; i < 2; i++) {
+        if (output[i].started) {
+            SPAWN_CHECK(posix_spawn_file_actions_adddup2(&actions, output[i].ends[1], i + 1));
+            SPAWN_CHECK(posix_spawn_file_actions_addclose(&actions, output[i].ends[0]));
+            SPAWN_CHECK(posix_spawn_file_actions_addclose(&actions, output[i].ends[1]));
+        } else {
+            SPAWN_CHECK(posix_spawn_file_actions_addopen(&actions, i + 1, "/dev/null", O_WRONLY, 0));
+        }
+    }
+    if (host_cwd) SPAWN_CHECK(posix_spawn_file_actions_addchdir(&actions, host_cwd));
     pid_t native_pid;
-    int spawn_err = posix_spawn(&native_pid, native_path, &actions, &attrs,
-                                native_argv, native_envp);
-
+    SPAWN_CHECK(posix_spawn(&native_pid, native_path, &actions, &attrs, native_argv, native_envp));
+#undef SPAWN_CHECK
     posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attrs);
     native_free_string_array(native_argv);
     native_free_string_array(native_envp);
     free(host_cwd);
-
-    if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
-    if (stderr_pipe[1] >= 0) close(stderr_pipe[1]);
-
-    if (spawn_err != 0) {
-        if (stdout_pipe[0] >= 0) close(stdout_pipe[0]);
-        if (stderr_pipe[0] >= 0) close(stderr_pipe[0]);
-        printk("native_offload: posix_spawn failed: %s\n", strerror(spawn_err));
-        return _ENOEXEC;
+    // All forwarders are live before the child exists; no fallible setup can
+    // strand a child or force a return after guest exec commitment.
+    for (unsigned i = 0; i < 2; i++) {
+        if (output[i].ends[1] >= 0) close(output[i].ends[1]);
+        output[i].ends[1] = -1;
     }
-
-    pthread_t stdout_tid = 0, stderr_tid = 0;
-    if (stdout_pipe[0] >= 0)
-        stdout_tid = start_pipe_forward(stdout_pipe[0], stdout_dest);
-    if (stderr_pipe[0] >= 0)
-        stderr_tid = start_pipe_forward(stderr_pipe[0], stderr_dest);
-
-    printk("native_offload: spawned host pid %d for guest pid %d\n",
-           native_pid, current->pid);
-
     current->native_pid = native_pid;
     current->is_native_proxy = true;
-
     apply_exec_semantics(guest_file);
-
-    // Wait for native process
     int status;
     while (true) {
         pid_t ret = waitpid(native_pid, &status, 0);
         if (ret == native_pid) break;
         if (ret < 0 && errno == EINTR) continue;
-        if (ret < 0) {
-            printk("native_offload: waitpid failed: %s\n", strerror(errno));
-            status = 1 << 8;
-            break;
-        }
+        // Returning with a live child would violate ownership. An unexpected
+        // wait failure is fatal to this execution, never a setup rollback.
+        if (ret < 0) die("native_offload: cannot reap child: %s", strerror(errno));
     }
-
-    if (stdout_tid) pthread_join(stdout_tid, NULL);
-    if (stderr_tid) pthread_join(stderr_tid, NULL);
-
-    int exit_code;
-    if (WIFEXITED(status)) {
-        exit_code = WEXITSTATUS(status) << 8;
-        printk("native_offload: host pid %d exited with code %d\n",
-               native_pid, WEXITSTATUS(status));
-    } else if (WIFSIGNALED(status)) {
-        exit_code = WTERMSIG(status);
-        printk("native_offload: host pid %d killed by signal %d\n",
-               native_pid, WTERMSIG(status));
-    } else {
-        exit_code = 1 << 8;
-    }
-
+    finish_offload_pipe(&output[0]);
+    finish_offload_pipe(&output[1]);
+    for (unsigned i = 0; i < 3; i++) if (stdio[i]) fd_close(stdio[i]);
+    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) << 8 :
+        WIFSIGNALED(status) ? WTERMSIG(status) : 1 << 8;
     register_new_files(argc, argv);
     current->is_native_proxy = false;
     current->native_pid = 0;
     do_exit(exit_code);
     __builtin_unreachable();
+
+spawn_rollback:
+    if (attrs_live) posix_spawnattr_destroy(&attrs);
+    if (actions_live) posix_spawn_file_actions_destroy(&actions);
+    finish_offload_pipe(&output[0]);
+    finish_offload_pipe(&output[1]);
+    for (unsigned i = 0; i < 3; i++) if (stdio[i]) fd_close(stdio[i]);
+    free(host_cwd);
+    native_free_string_array(native_argv);
+    native_free_string_array(native_envp);
+    return err;
 }
 #endif // HAS_POSIX_SPAWN
 
@@ -810,6 +927,8 @@ int native_offload_exec(const char *native_path,
                         const char *envp) {
     // Check for in-process handler first (works on iOS and macOS)
     struct offload_entry *entry = offload_find(guest_file);
+    if (entry && entry->cooperative)
+        return exec_cooperative(entry->cooperative, guest_file, argc, argv);
     if (entry && entry->handler)
         return exec_handler(entry->handler, guest_file, argc, argv, envp);
 

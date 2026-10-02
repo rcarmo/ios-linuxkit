@@ -5,7 +5,8 @@
 #include "fs/path.h"
 #include "misc.h"
 
-static int __path_normalize(const char *at_path, const char *path, char *out, int flags, int levels) {
+static int __path_normalize(const char *at_path, const char *path, char *out,
+        int flags, int levels, const char *root_path) {
     // you must choose one
     if (flags & N_SYMLINK_FOLLOW)
         assert(!(flags & N_SYMLINK_NOFOLLOW));
@@ -42,7 +43,8 @@ static int __path_normalize(const char *at_path, const char *path, char *out, in
                 continue;
             } else if (p[1] == '.' && (p[2] == '\0' || p[2] == '/')) {
                 // double dot path component, delete the last component
-                if (o != out) {
+                size_t floor = root_path ? strlen(root_path) : 0;
+                if ((size_t)(o - out) > floor) {
                     do {
                         o--;
                         n++;
@@ -93,8 +95,17 @@ static int __path_normalize(const char *at_path, const char *path, char *out, in
                     return _ENAMETOOLONG;
                 c[res] = '\0';
                 // if we should restart from the root, copy down
-                if (*c == '/')
-                    memmove(out, c, strlen(c) + 1);
+                if (*c == '/') {
+                    if (root_path && *root_path) {
+                        size_t root_len = strlen(root_path), link_len = strlen(c);
+                        if (root_len + link_len >= MAX_PATH) return _ENAMETOOLONG;
+                        // c points inside out; move the link before the prefix.
+                        memmove(out + root_len, c, link_len + 1);
+                        memcpy(out, root_path, root_len);
+                    } else {
+                        memmove(out, c, strlen(c) + 1);
+                    }
+                }
                 size_t out_len = strlen(out);
                 size_t rest_len = strlen(p);
                 bool have_rest = rest_len != 0;
@@ -106,7 +117,7 @@ static int __path_normalize(const char *at_path, const char *path, char *out, in
                     expanded_path[out_len] = '/';
                     memcpy(expanded_path + out_len + 1, p, rest_len + 1);
                 }
-                return __path_normalize(NULL, expanded_path, out, flags, levels + 1);
+                return __path_normalize(NULL, expanded_path, out, flags, levels + 1, root_path);
             }
 
             // if there's a slash after this component, ensure that if it
@@ -158,7 +169,27 @@ int path_normalize(struct fd *at, const char *path, char *out, int flags) {
         assert(path_is_normalized(at_path));
     }
 
-    return __path_normalize(at != NULL ? at_path : NULL, path, out, flags, 0);
+    return __path_normalize(at != NULL ? at_path : NULL, path, out, flags, 0, NULL);
+}
+
+int path_normalize_in_fs(struct fs_info *fs, struct fd *at,
+        const char *path, char *out, int flags) {
+    if (!fs || !path || !*path) return _ENOENT;
+    // Context callers hold a private retained snapshot; never swap current->fs.
+    struct fd *root = fs->root;
+    if (path[0] == '/') at = root;
+    else if (at == AT_PWD) at = fs->pwd;
+    if (!root || !at || IS_ERR(root) || IS_ERR(at)) return _EBADF;
+    char root_path[MAX_PATH], at_path[MAX_PATH];
+    int err = generic_getpath(root, root_path);
+    if (err < 0) return err;
+    err = generic_getpath(at, at_path);
+    if (err < 0) return err;
+    if (!strcmp(root_path, "/")) root_path[0] = '\0';
+    size_t n = strlen(root_path);
+    if (strncmp(at_path, root_path, n) || (at_path[n] && at_path[n] != '/'))
+        return _EXDEV;
+    return __path_normalize(at_path, path, out, flags, 0, root_path);
 }
 
 
