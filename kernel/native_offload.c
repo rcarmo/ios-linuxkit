@@ -36,6 +36,7 @@
 #include "kernel/calls.h"
 #include "kernel/task.h"
 #include "kernel/native_offload.h"
+#include "kernel/native_offload_internal.h"
 #include "kernel/native_offload_policy.h"
 #include "kernel/fs.h"
 #include "fs/fd.h"
@@ -52,17 +53,6 @@
 static atomic_bool registry_frozen;
 void native_offload_freeze_registry(void) {
     atomic_store_explicit(&registry_frozen, true, memory_order_release);
-}
-
-struct native_handler_context {
-    struct task *owner;
-    pthread_t thread;
-    struct native_fs_context *fs;
-};
-struct native_fs_context *native_handler_fs(struct native_handler_context *context) {
-    if (!context || current != context->owner ||
-            !pthread_equal(pthread_self(), context->thread)) return NULL;
-    return context->fs;
 }
 
 // The Linux adapter compiles the real portable path only in test fixtures.
@@ -782,6 +772,9 @@ static int exec_cooperative(native_cooperative_handler_func handler,
 
     char **args = calloc(argc + 1, sizeof(char *));
     if (!args) return _ENOMEM;
+    struct native_handler_context context = {
+        .owner = current, .thread = pthread_self(),
+    };
     int err = _ENOMEM;
     const char *p = argv;
     for (size_t i = 0; i < argc; i++) {
@@ -789,19 +782,36 @@ static int exec_cooperative(native_cooperative_handler_func handler,
         if (!args[i]) goto rollback;
         p += strlen(p) + 1;
     }
-    struct native_fs_context *fs = native_fs_context_create();
-    if (IS_ERR(fs)) { err = PTR_ERR(fs); goto rollback; }
-    struct native_handler_context context = {
-        .owner = current, .thread = pthread_self(), .fs = fs,
-    };
-    // All allocation/path setup completed without changing exec state.
+    context.fs = native_fs_context_create();
+    if (IS_ERR(context.fs)) { err = PTR_ERR(context.fs); goto rollback; }
+    retain_exec_stdio(context.stdio);
+    for (unsigned i = 0; i < 3; i++) {
+        err = native_io_admit(context.stdio[i], i != 0);
+        if (err < 0) goto rollback;
+    }
+    err = native_io_init(&context);
+    if (err < 0) goto rollback;
+    // Publish before exec action reset so ignored/blocked pending signals keep
+    // their original admission meaning. No further fallible setup remains.
+    if (!native_cancel_begin(current, &context.cancel)) { err = _EBUSY; goto rollback; }
     apply_exec_semantics(guest_file);
-    int ret = handler((int)argc, args, &context);
-    native_fs_context_destroy(fs);
+    int ret = native_handler_check(&context) ? 0 : handler((int)argc, args, &context);
+    // A callback that forgot its final checkpoint must not report success after
+    // the deadline. This still cannot preempt a callback that never returns.
+    native_handler_check(&context);
+    // Token stays published through cleanup; no forwarding workers to abandon.
+    for (unsigned i = 0; i < 3; i++) if (context.stdio[i]) fd_close(context.stdio[i]);
+    native_fs_context_destroy(context.fs);
     native_free_string_array(args);
-    do_exit((ret & 0xff) << 8);
+    int sig = native_cancel_finish(current, &context.cancel);
+    int status = (ret & 0xff) << 8;
+    if (context.io_error && !status) status = 1 << 8;
+    if (sig) status = sig;
+    do_exit(status);
     __builtin_unreachable();
 rollback:
+    for (unsigned i = 0; i < 3; i++) if (context.stdio[i]) fd_close(context.stdio[i]);
+    native_fs_context_destroy(context.fs);
     native_free_string_array(args);
     return err;
 }

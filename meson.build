@@ -135,6 +135,8 @@ if get_option('kernel') == 'ish'
         'kernel/ptrace.c',
         'kernel/native_offload.c',
         'kernel/native_fs.c',
+        'kernel/native_cancel.c',
+        'kernel/native_io.c',
 
         'kernel/fs.c',
         'kernel/fs_info.c',

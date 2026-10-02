@@ -74,6 +74,10 @@ struct task *task_create_(struct task *parent) {
         *task = *parent;
     task->pid = pid->id;
     pid->task = task;
+    // Offload state belongs to one execution, never a copied/forked child.
+    task->native_pid = 0;
+    task->is_native_proxy = false;
+    task->native_cancel = NULL;
 
 #ifdef GUEST_ARM64
     // Invalidate exclusive monitor after copying parent state.

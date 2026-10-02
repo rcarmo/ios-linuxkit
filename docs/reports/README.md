@@ -20,7 +20,9 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [Documentation review — 30 September 2026](audits/DOCUMENTATION_REVIEW_2026-09-30.md) records the 13-guide source/command review, technical-writing rules and validation for 2.3.1.
 
-[Cooperative guest-context execution](audits/OFFLOAD_CONTEXT_EXEC_2026-10-02.md) wires raw guest arguments and retained VFS context into a separate dispatcher, with transactional failure injection and realfs/fakefs concurrent execution. Four-lane compatibility/procfs and frozen-AOT gates pass; bounded streams/cancellation remain pending.
+[Cooperative bounded streams/token isolation](audits/OFFLOAD_BOUNDED_IO_2026-10-02.md) adds restricted TCP stdio with per-call nonblocking operations, byte/deadline limits and locked signal/fork isolation. It does not admit arbitrary TTY/file/pipe I/O or enable an app handler.
+
+[Cooperative guest-context execution](audits/OFFLOAD_CONTEXT_EXEC_2026-10-02.md) wires raw guest arguments and retained VFS context into a separate dispatcher, with transactional failure injection and realfs/fakefs concurrent execution. Four-lane compatibility/procfs and frozen-AOT gates pass; the later stream report above follows it.
 
 [Offload filesystem context foundation](audits/OFFLOAD_FS_CONTEXT_2026-10-02.md) records retained guest root/CWD, VFS path/metadata semantics and realfs/fakefs concurrent tests; the execution report above completes its wiring.
 

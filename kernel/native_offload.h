@@ -2,6 +2,7 @@
 #define NATIVE_OFFLOAD_H
 
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <sys/types.h>
 #include <signal.h>
 struct task;
@@ -80,8 +81,10 @@ struct fd *native_fs_open(struct native_fs_context *context, const char *path,
 // all filesystem access uses native_handler_fs(context). No host path rewriting
 // or post-hoc directory/metadata scan takes place. The context is borrowed until
 // return, guest-thread owned, and must not escape to workers. Open fds are owned
-// by the handler and must be closed before return. Stream and cancellation APIs
-// are not yet provided: this scaffold alone is NOT a cancellable I/O contract.
+// by the handler and must be closed before return. Poll native_handler_check at
+// bounded intervals. All handler-owned workers must be joined before return;
+// the framework creates no workers and never uses pthread_cancel. Filesystem
+// opens/disk I/O are NOT deadline-safe. Unsupported stdio is refused precommit.
 // Execution refuses a multi-thread guest group or an exiting group.
 struct native_handler_context;
 typedef int (*native_cooperative_handler_func)(int argc, char **argv,
@@ -89,6 +92,34 @@ typedef int (*native_cooperative_handler_func)(int argc, char **argv,
 int native_offload_add_cooperative_handler(const char *guest_name,
         native_cooperative_handler_func handler);
 struct native_fs_context *native_handler_fs(struct native_handler_context *context);
+// Streams: connected TCP sockets only (actual guest socket fdops, INET/INET6).
+// No shared O_NONBLOCK mutation, borrowed host fd, TTY/file/pipe fallback or
+// Unix-socket SCM bypass. Closed/CLOEXEC stdio returns EBADF. Darwin output must
+// already have SO_NOSIGPIPE; it is checked, not silently changed. Linux uses
+// MSG_NOSIGNAL. All calls execute on the owning guest thread, not workers.
+#define NATIVE_IO_CHUNK 4096
+#define NATIVE_IO_BYTES (1024 * 1024) // stdin and combined stdout/stderr budgets
+#define NATIVE_IO_WAIT_MS 250        // maximum per-call retry deadline
+#define NATIVE_HANDLER_MS 5000      // checkpoints/stream calls, not a watchdog
+int native_handler_check(struct native_handler_context *context);
+int native_handler_signal(struct native_handler_context *context);
+ssize_t native_handler_read(struct native_handler_context *context, void *buf,
+        size_t size, unsigned wait_ms);
+ssize_t native_handler_write(struct native_handler_context *context, unsigned stream,
+        const void *buf, size_t size, unsigned wait_ms);
+// Short transfers must be handled by the caller. Fatal I/O/time/budget errors
+// are sticky and force nonzero guest exit even if ignored; signal status wins.
+// Invalid calls (wrong context/stream/size) do not mutate context state.
+
+// Opt-in locked signal-token lifecycle, independent of any stream backend.
+struct native_cancel { atomic_int signal; };
+int native_cancel_signal(const struct native_cancel *cancel);
+bool native_cancel_begin(struct task *task, struct native_cancel *cancel);
+int native_cancel_finish(struct task *task, struct native_cancel *cancel);
+bool native_cancel_request(struct task *task, int sig);
+// Caller holds sighand->lock; task/token lifetimes remain owned by executor.
+bool native_cancel_request_locked(struct task *task, int sig);
+
 // Internal startup boundary; called before launching/running the first guest.
 void native_offload_freeze_registry(void);
 
