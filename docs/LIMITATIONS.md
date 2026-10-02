@@ -16,6 +16,23 @@ Bind mounts and native offload widen the guest's access:
 
 Validate paths and arguments at the host boundary.
 
+## Native offload and cancellation
+
+[Cooperative offload](NATIVE_OFFLOAD.md) is startup-only and has no production
+handler registration. It refuses sibling/exiting guest groups and unsupported
+stdio. Only connected TCP streams have the validated per-call nonblocking,
+byte/retry contract; Apple TTY/UI, PTY, file and pipe stdio are not admitted.
+Poll readiness does not guarantee that a write returns within a deadline.
+
+Cooperative checkpoints are not a watchdog. Local VFS operations can block,
+workers cannot be abandoned, and a handler must close its owned descriptors and
+join its workers before returning. The test-only local-copy example bounds bytes
+and calls, retains partial output on failure/cancellation and never removes a
+potentially replaced output path. It provides no stable source snapshot, atomic
+publication or durable-storage guarantee. Legacy handlers retain host chdir,
+path translation, scans and blocking forwarders; their cancellation is not made
+bounded by the cooperative API.
+
 ## Guest architecture
 
 Only an AArch64 guest is supported. `meson_options.txt` accepts only `arm64`, and `meson.build` rejects another guest architecture. The Linux command-line build also requires an AArch64 host for the precompiled AArch64 gadgets.
@@ -96,7 +113,11 @@ slowdown, with Python peak RSS rising from 18.3MiB to 54.1MiB.
 
 Linux recordings contain native words and baked offsets. Apple reuse requires
 target ABI/symbol checks, app recovery/build integration and physical-device
-validation. Existing Xcode schemes use gadgets. [Apple implementation steps](NATIVE_AOT_IOS.md)
+validation. Shared recovery includes a callable, uninstalled native-only app
+adapter, not an integrated Apple fault path. Read-only layout diagnostics report
+conventions only after normal backend initialisation (`ready=1`); values from a
+not-ready bootstrap or a Linux binary cannot substitute for an observed Apple
+contract. Existing Xcode schemes use gadgets. [Apple implementation steps](NATIVE_AOT_IOS.md)
 list the checks needed before distribution.
 
 ## Release tooling

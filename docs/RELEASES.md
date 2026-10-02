@@ -1,6 +1,6 @@
 # Versioning and releases
 
-The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.4.0**, Apple build **817**, tagged as `v2.4.0` after validation. See the [2.4.0 source release record](reports/releases/IOS_LINUXKIT_2.4.0.md).
+The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.4.1**, Apple build **818**, with annotated tag `v2.4.1` created only after validation. See the [2.4.1 source release record](reports/releases/IOS_LINUXKIT_2.4.1.md).
 
 ## Version sources
 
@@ -29,7 +29,10 @@ Increment the Apple build number for every uploaded build, including rebuilds of
 1. Change `MARKETING_VERSION` in `app/AppARM64.xcconfig`.
 2. Change every `CURRENT_PROJECT_VERSION` entry in `iSH.xcodeproj/project.pbxproj` to the same new integer.
 3. Update the current version in `README.md`, `docs/IOS_APPLICATION.md` and this file.
-4. Add a dated report under `docs/reports/releases/` for source-release validation, an archive or a distribution run. State which kind of evidence it records; source validation alone does not establish iOS archive or device behaviour.
+4. Audit every maintained guide and index for stale versions, commands,
+   capabilities and validation scope. Update current procedures before tagging;
+   dated reports/legacy/vendor notes retain their original evidence.
+5. Add a dated report under `docs/reports/releases/` for source-release validation, an archive or a distribution run. State which kind of evidence it records; source validation alone does not establish iOS archive or device behaviour.
 
 Verify the fields:
 
@@ -53,11 +56,17 @@ CC=clang make test-arm64-load64-fault-pc
 CC=clang make test-arm64-upstream
 CC=clang make test-arm64-proc-exit-race
 HOST_CC=clang make ROOTFS_DIR="$PWD/debian-arm64-fakefs" test-arm64-internal-continue-fixtures
-make check-docs
+CC=clang make test-arm64-offload-setup test-arm64-native-fs \
+  test-arm64-offload-context test-arm64-offload-io test-arm64-offload-local-copy
+make test-xcode-gadget-guard test-aot-generator test-aot-kit test-rootfs-download
+make check-docs check-docs-style test-docs-style
 git diff --check
 git status --short
 ```
 
+For shared native fault/layout changes, also run the O0/O2 native/oracle tests
+and frozen no-emitter release/debug linked-image gates without retraining or
+ABI relabelling. Retain source/runner hashes and verify them after completion.
 Run the runtime and workload gates required by the changed code as described in [VALIDATION.md](VALIDATION.md). Package-manager or repository failures must be recorded separately from emulator results.
 
 Linux validation does not establish Xcode, signing or device behaviour. On macOS, build the two ARM64 schemes that will be distributed and smoke-test the exact archive on a physical device. The inherited Fastlane upload lane targets upstream iSH and must not be used without the changes listed in [IOS_APPLICATION.md](IOS_APPLICATION.md#fastlane-status).
@@ -68,17 +77,21 @@ Commit the version, documentation and release evidence together. Push the commit
 
 ```sh
 git push origin master
-git tag -a v2.3.2 -m 'ios-linuxkit 2.3.2'
-git push origin v2.3.2
+git tag -a v2.4.1 -m 'ios-linuxkit 2.4.1'
+git push origin v2.4.1
 ```
 
-Replace `2.3.2` with the version in `app/AppARM64.xcconfig`. Verify all three references:
+Replace `2.4.1` with the version in `app/AppARM64.xcconfig`. Verify all three references:
 
 ```sh
 git rev-parse HEAD
 git rev-parse origin/master
-git rev-list -n 1 v2.3.2
-git ls-remote origin refs/heads/master refs/tags/v2.3.2 'refs/tags/v2.3.2^{}'
+git rev-list -n 1 v2.4.1
+git ls-remote origin refs/heads/master refs/tags/v2.4.1 'refs/tags/v2.4.1^{}'
 ```
+
+Publish the GitHub release against that verified tag. State source-only scope,
+link the dated release record and list unrun Apple gates; do not use the inherited
+Fastlane upload lane. Verify the release is public and targets the intended tag.
 
 A Git tag records source provenance. It does not prove that an iOS archive was signed, installed or uploaded.

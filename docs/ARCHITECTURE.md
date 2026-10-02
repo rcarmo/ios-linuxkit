@@ -62,7 +62,7 @@ Large lazy reservations record ranges and permissions without allocating every p
 
 ## Fault recovery
 
-A host `SIGSEGV` or `SIGBUS` can occur inside a memory gadget when a guest access needs copy-on-write, stack growth or page materialisation. Faultable operations save their guest instruction address in `fiber_frame::jit_saved_pc`. The AArch64 host signal adapter in `platform/host_context_aarch64.h` redirects execution to `jit_crash_trampoline`; the dispatch loop resolves the guest fault and retries that instruction.
+A host `SIGSEGV` or `SIGBUS` can occur inside a memory gadget when a guest access needs copy-on-write, stack growth or page materialisation. Faultable operations save their guest instruction address in `fiber_frame::jit_saved_pc`. The shared core in `platform/native_fault.c` reads the OS context through `platform/host_context_aarch64.h` and redirects execution to `jit_crash_trampoline`; the CLI adapter in `main.c` keeps its signal policy. The dispatch loop resolves the guest fault and retries that instruction. The callable app adapter refuses gadget replay and is not installed by existing app schemes.
 
 The precise saved address prevents earlier instructions in the same block from executing twice. Normal-register unsigned-immediate `LDR X` saves that address inside `load64_imm_fast`, consuming `[operands][guest PC]` together instead of dispatching a separate PC-save gadget. Its LDR+CBZ/CBNZ fusion already saves the LDR PC internally; other memory forms retain their existing saves. Operand-stream producers and consumers must change together.
 
@@ -74,7 +74,14 @@ matching active checkpoint, disarms it and retries the guest instruction.
 Unmatched native faults stop execution. The ABI hash includes checkpoint/frame
 offsets, entry and pinning conventions, TLB/context layout and table sizes;
 incompatible images are rejected. Actual Linux restart tests and limits are in
-the [host report](reports/audits/AOT_ALPINE_HOST_2026-09-29.md).
+the [host report](reports/audits/AOT_ALPINE_HOST_2026-09-29.md) and
+[shared-recovery report](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md).
+
+Native builds expose read-only `jit_layout_read` and `/proc/ish/jit-layout`.
+They report compiled layouts without initialising the backend or mapping code.
+Convention fields are usable only with `ready=1`, after normal initialisation
+has selected them. A no-image bootstrap can stay not ready. Diagnostics neither
+relabel recordings nor establish an Apple target contract.
 
 ## Userspace kernel
 
@@ -100,6 +107,17 @@ Some host differences remain at their call sites:
   without supporting guest route changes or network-change notifications;
 - synchronisation uses host-specific timed-wait and lock operations.
 
+## Native offload
+
+[Offload contracts](NATIVE_OFFLOAD.md) separate the existing legacy handler and
+macOS spawn paths from the startup-only cooperative API. Cooperative execution
+uses raw guest argv, retained VFS state and a guest-thread-owned cancellation
+context; it refuses sibling/exiting guest groups. Stream admission is restricted
+to connected TCP stdio with per-call nonblocking operations and work/retry limits.
+No production cooperative handler is registered. The bounded local-copy example
+is test-only; disk operations have no universal latency guarantee. Legacy host
+CWD/path translation and blocking forwarders retain their existing behaviour.
+
 ## Guest compatibility settings
 
 `kernel/exec.c` supplies defaults when the guest environment does not already define them:
@@ -119,4 +137,6 @@ The initial process path in `xX_main_Xx.h` adds `--jitless`, `--no-lazy`, `--no-
 
 The `iSH-ARM64` target links the userspace kernel and emulator libraries into an iOS application. Its build downloads the AArch64 Alpine rootfs declared by `app/GuestARM64.xcconfig`. `app/download-root.sh` verifies the pinned SHA-256 and AArch64 BusyBox before atomically replacing the bundled archive.
 
-Host integration includes fakefs bind mounts through `fakefs_bind_mount()` and optional native command handlers through `native_offload_add_handler()`. These interfaces run inside the app's iOS sandbox and inherit its trust boundary.
+Host integration includes fakefs bind mounts through `fakefs_bind_mount()` and optional legacy native command handlers through `native_offload_add_handler()`.
+The cooperative API has a separate ownership/VFS contract and is not enabled by
+the supplied schemes. These interfaces run inside the app's iOS sandbox and inherit its trust boundary.

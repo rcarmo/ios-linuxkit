@@ -96,7 +96,20 @@ ISH_NETLINK_STUB=1 build-arm64-linux/ish -r /absolute/guest-root /tmp/interfaces
 
 Unlike the upstream test worktree, our CLI builds directly on Linux: no generated
 Darwin adapters are needed. `CPPFLAGS` can provide Linux UAPI include paths for a
-native `musl-gcc` installation.
+native `musl-gcc` installation. On the Debian AArch64 validation host, the
+wrapper's default include search omits Linux UAPI headers. Use them after musl's
+own headers, so glibc headers do not replace musl's definitions:
+
+```sh
+CPPFLAGS='-idirafter /usr/include -idirafter /usr/include/aarch64-linux-gnu' \
+  make test-arm64-netlink CC=clang CC_GUEST=aarch64-linux-musl-gcc \
+  NETLINK_REALFS=/absolute/guest-root
+```
+
+The opt-in netlink backend is independent of [native offload](NATIVE_OFFLOAD.md).
+Enabling interface snapshots does not enable cooperative handlers, admit arbitrary
+socket types as handler stdio or bypass the offload stream limits. Source 2.4.1
+retains the same default-off switch and packaged Alpine pin.
 
 ## Evidence and remaining gates
 

@@ -12,8 +12,8 @@ The Linux command-line build requires an AArch64 host because its gadget files c
 | RAM | 16 GB class; about 14 GiB visible to Linux |
 | Host architecture | AArch64 |
 | OS | Debian Trixie |
-| Compiler used by the July audit and September source-release validation | Clang 19.1.7 |
-| September validation kernel | `6.6.89-cix` (AArch64) |
+| Compiler used by source-release validation | Clang 19.1.7 |
+| Validation kernel | `6.6.89-cix` (AArch64) |
 | Workspace storage | NVMe, ext4 |
 
 These specifications identify the test host. Smaller hosts have not been benchmarked. The `test-arm64-fcvt-vector` gate also uses the host CPU as an AArch64 floating-point oracle.
@@ -116,6 +116,14 @@ Common command-line options implemented by `xX_main_Xx.h` are:
 
 The program after these options is the initial guest process. There is no separate built-in help page; invalid option diagnostics come from `getopt`.
 
+## Native offload validation
+
+Ordinary Linux builds keep native-offload entry points disabled. The
+[offload guide](NATIVE_OFFLOAD.md) describes test-only actual-source adapters,
+startup registration, guest-VFS ownership, restricted TCP streams and the bounded
+local-copy example. Run the focused Make targets against matching build archives;
+passing them does not enable a production command or validate Darwin behaviour.
+
 ## Create and run a fakefs
 
 The rootfs URL and architecture are defined in `app/GuestARM64.xcconfig`. The current pin is Alpine 3.24.2 for AArch64:
@@ -205,6 +213,13 @@ Diagnostics are disabled unless named below or enabled by a debug build.
 | `ISH_ARM64_INTERNAL_CONTINUE_TAKEN=1` | Enable the associated taken-path mode. |
 
 Do not enable statistics or trace output in exact-output test runs unless the harness explicitly expects it.
+
+Native builds also expose read-only `/proc/ish/jit-layout` and `jit_layout_read`.
+They report actual compiled layouts without initialising the backend. `ready=0`
+has no usable ABI/prologue/pinning values; `ready=1` reports conventions selected
+by normal initialisation. The endpoint is absent from gadget builds. See
+[Linux AOT](NATIVE_AOT_BUILD_PLAN.md#observe-layout-without-enabling-the-backend)
+for commands and target-contract limits.
 
 ## SDL/VNC harness
 

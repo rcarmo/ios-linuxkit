@@ -20,6 +20,11 @@ Use an AArch64 Linux host for the command-line build. The supported build uses C
 - Put host differences behind `platform/` when the abstraction has more than one caller or prevents duplicated conditional code.
 - Do not hide a guest fault with a rootfs patch, binary patch or synthetic success result when the instruction or syscall is wrong.
 - Bound guest-controlled lengths before allocating host buffers or copying data.
+- Keep cooperative contexts/task/token references on the owning guest thread;
+  never abandon live workers or change process-wide CWD/shared nonblocking flags.
+  Follow [offload contracts](NATIVE_OFFLOAD.md), including partial-output policy.
+- Keep app AOT disabled until actual SDK/ABI/image/signing/device gates pass;
+  Linux adapters and a callable fault function do not satisfy those gates.
 
 ## Tests
 
@@ -38,7 +43,10 @@ make test-arm64-runtime-coverage \
 
 Memory, signal, synchronisation and translated-execution changes also need the debug runtime gate. Network and package-manager changes need the CLI or package lane that exercises them.
 
-A timeout, safety valve, unexpected diagnostic or skipped row is not a pass. Record package and rootfs failures separately from emulator results.
+A timeout, safety valve, unexpected diagnostic or skipped row is not a pass.
+Hash source and runners before launch, wait for completion, and verify hashes
+before using the evidence. Do not reuse stale return-code files or edit a runner
+while its shell is still reading it. Record package and rootfs failures separately from emulator results.
 
 For performance-only changes, the correctness fixture should pass both the baseline and candidate; use a deliberate negative mutation to show it detects the invariant being protected, then restore and rebuild. Keep paired timing separate from correctness runs, use identical commands and input bytes, and reject changes whose benefit does not repeat. Preserve native-oracle failures and record the exact paths exercised by each test.
 
@@ -51,6 +59,8 @@ The maintained guides describe current `master`:
 - `docs/LINUX_DEVELOPMENT.md` and `docs/IOS_APPLICATION.md` for procedures;
 - `docs/NATIVE_AOT_BUILD_PLAN.md`, `docs/NATIVE_AOT_ARTIFACT_KIT.md` and
   `docs/NATIVE_AOT_IOS.md` for AOT recording, reusable inputs and Apple integration;
+- `docs/NATIVE_OFFLOAD.md` for legacy/cooperative ownership and I/O contracts;
+- `docs/NETLINK_TAILSCALE.md` for opt-in interface discovery;
 - `docs/VALIDATION.md` for gates;
 - `docs/LIMITATIONS.md` for known constraints;
 - `docs/RELEASES.md` for version and tag changes.

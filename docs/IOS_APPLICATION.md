@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.3.1 with Apple build number 814; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.4.1 with Apple build number 818; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 
@@ -48,9 +48,14 @@ The ARM64 target runs the `Build Meson (ARM64)` shell phase. `app/xcode-meson.sh
 guest_arch=arm64
 engine=asbestos
 kernel=ish
+jit=false
+jit_emit=false
+cli_aot=[]
 ```
 
-Ninja then builds and links:
+The bridge resets all three native/image settings together in fresh and reused
+build directories; configuration failure propagates. An environment override
+cannot turn an existing scheme into an AOT target. Ninja then builds and links:
 
 - `libish.a` — userspace kernel and filesystems;
 - `libish_emu.a` — ARM64 decoder, gadgets and TLB;
@@ -102,7 +107,14 @@ disable these generic offloads. Synthetic Apple-only commands are unaffected.
 The safeguard controls exec selection. Host path validation and sandbox controls
 are still required.
 
-The FFmpeg scheme uses this path for its test handler. Darwin builds can also map a guest command to a host executable through the `-n NAME=PATH` command-line form used by the shared launcher code. Native handlers execute with the app's host privileges and must not treat guest arguments or paths as trusted.
+The FFmpeg scheme uses this legacy path for its fake test handler. It retains
+host-path translation, process-wide CWD and pipe-backed output; its terminal
+writes have no bounded cancellation guarantee. It has not been converted to the
+cooperative API. The test-only local-copy handler is never linked or registered
+by the app. See [offload contracts](NATIVE_OFFLOAD.md) for the separate raw-argv,
+VFS, token and restricted TCP contract.
+
+Darwin builds can also map a guest command to a host executable through the `-n NAME=PATH` command-line form used by the shared launcher code. Native handlers execute with the app's host privileges and must not treat guest arguments or paths as trusted.
 
 ## Fastlane status
 
@@ -128,9 +140,12 @@ source-review results for earlier app changes.
 The native/AOT backend is available through Meson and tested with linked Linux
 ELF images. Existing Xcode schemes do not configure it or link images. The
 [Apple AOT procedure](NATIVE_AOT_IOS.md) specifies the isolated build settings,
-shared ABI checks, app fault recovery, Mach-O conversion, static linkage,
+shared ABI checks, actual app fault-adapter installation, Mach-O conversion, static linkage,
 signing and device tests needed to add it.
 
-The [2.3.1 source release](reports/releases/IOS_LINUXKIT_2.3.1.md) includes
-artifact tools and operating guides. It keeps the gadget-only app configuration
-and Alpine 3.24.2 pin. Existing installed userlands are unchanged.
+The [2.4.1 source release](reports/releases/IOS_LINUXKIT_2.4.1.md) includes
+shared CLI/app recovery preparation and read-only target layout diagnostics.
+The callable app adapter is not installed; no isolated AOT scheme or app image
+membership exists. Keep the gadget-only app configuration and Alpine 3.24.2 pin.
+Existing installed userlands are unchanged. Apple archive, signing and physical-device
+evidence must be collected separately.

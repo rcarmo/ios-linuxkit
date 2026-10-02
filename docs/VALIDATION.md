@@ -4,7 +4,10 @@ Every runtime change needs a focused regression and a broader gate. The Makefile
 
 ## Host and test data
 
-The maintained gates run on an AArch64 Linux host. The July 2026 audit used an Orange Pi 6 Plus with a CIX P1 SoC, Debian Trixie and Clang 19.1.7.
+The maintained gates run on an Orange Pi 6 Plus: CIX P1 (CD8180/CD8160), eight
+Cortex-A720 and four Cortex-A520 cores, 16 GB-class RAM (about 14 GiB visible),
+NVMe/ext4, native Debian Trixie, Linux 6.6.89-cix AArch64, 4 KiB pages and
+Clang 19.1.7. Apple SDK, signing and physical-device tests require another host.
 
 Runtime tests modify their fakefs when they install missing packages. Copy the rootfs or rebuild it when package state must be reproducible. Network and package repositories can make broad suites non-deterministic even when the emulator is unchanged.
 
@@ -89,6 +92,20 @@ The native tests also exercise the uninstalled app adapter under Linux
 SA_SIGINFO, plus read-only layout diagnostics before/after normal initialisation.
 These do not prove Apple context or app integration. Apple app fault recovery
 needs adapter installation and device tests in [iOS AOT](NATIVE_AOT_IOS.md).
+
+## Cooperative offload gates
+
+[Offload contracts](NATIVE_OFFLOAD.md) describe legacy setup versus the new
+startup-only guest-context path. Run all five focused targets in gadget/native
+release/debug lanes after ownership, filesystem, cancellation or I/O changes.
+Linux adapters compile actual portable source, not Darwin process discovery or
+Apple terminal behaviour. Preserve raw argv/VFS, exact resource rollback,
+joined workers, token cleanup and replacement-safe partial-output checks.
+
+Freeze source/runners before launching evidence runs. Use a new output directory,
+wait for every runner to exit and verify source hashes before accepting its
+return-code files. Both frozen linked-image gates must pass without retraining
+or ABI overrides when the shared native layout/recovery path changes.
 
 ## Runtime coverage stages
 
@@ -175,6 +192,9 @@ When a broad row fails, rerun its exact guest command with a bounded timeout. Pr
 | [Alpine integration](reports/audits/AOT_ALPINE_INTEGRATION_2026-09-29.md) | Regular-file readiness, exit TLS handoff and a separate proc-stat/signal lock cycle. |
 | [AOT host integration](reports/audits/AOT_ALPINE_HOST_2026-09-29.md) | Four linked images, exact restart, native oracles and release/debug stress. |
 | [Reusable artifacts](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md) | Restored guest identity, no-retraining rebuild, execution PCs, timings/RSS and Apple handoff limits. |
+| [TCP/token isolation](reports/audits/OFFLOAD_BOUNDED_IO_2026-10-02.md) | Four-lane restricted-stream/cancellation proof; unsupported Apple terminal path. |
+| [Local-copy example](reports/audits/OFFLOAD_LOCAL_COPY_2026-10-02.md) | Test-only exclusive output, partial retention, metadata/allocation/I/O failure and cleanup gates. |
+| [Shared recovery](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md) | CLI/uninstalled-app adapters and read-only layout, Linux restart/oracle and frozen-image gates. |
 
 Earlier broad-suite failures include Debian package detection selecting
 Alpine's `build-base`, a glibc alternate-stack fixture exiting during
@@ -186,7 +206,8 @@ changing their status; focused passes do not close them.
 The nearby-page read-fault workaround is described in
 [LIMITATIONS.md](LIMITATIONS.md#memory-and-code-protection). A historical proc
 exit139 remains unattributed; the captured later defects have separate evidence.
-Sanitizer runtime and accelerated Apple device validation have not run.
+Whole-runtime sanitizer validation and accelerated Apple device validation have
+not run. The netlink encoder's focused sanitizer evidence has its own scope.
 
 ## Before commit
 

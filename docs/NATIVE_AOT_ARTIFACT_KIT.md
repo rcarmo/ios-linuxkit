@@ -112,6 +112,11 @@ for MODE in release debug; do
   CC=clang HOST_CC=clang EVIDENCE_DIR="$PENDING/evidence/upstream-$MODE" \
     make RELEASE_BUILD_DIR="$BUILD" ROOTFS_DIR="$TEST_ROOT" DEBIAN_ROOTFS_DIR="$TEST_ROOT" \
     test-arm64-upstream > "$PENDING/evidence/upstream-$MODE.log" 2>&1
+  for GATE in offload-setup native-fs offload-context offload-io offload-local-copy; do
+    CC=clang EVIDENCE_DIR="$PENDING/evidence/$GATE-$MODE" \
+      make RELEASE_BUILD_DIR="$BUILD" "test-arm64-$GATE" \
+      > "$PENDING/evidence/$GATE-$MODE.log" 2>&1
+  done
   CC=clang HOST_CC=clang make RELEASE_BUILD_DIR="$BUILD" \
     ROOTFS_DIR="$TEST_ROOT" DEBIAN_ROOTFS_DIR="$TEST_ROOT" REPORT_DIR="$PENDING/evidence" \
     test-arm64-poll-regular test-arm64-fcvt-vector test-arm64-load64-fault-pc \
@@ -129,7 +134,11 @@ bun tests/arm64/native-aot/execution.ts "$PENDING/build-debug/ish" \
 
 A failed command stops the sequence. Preserve its logs and fix the failure
 before publication. `execution.ts` needs GDB and a debug binary. Native restart
-checks use a separate emission-capable recorder build.
+checks use a separate recorder build and cover the shared core and callable app
+adapter under Linux signals. The read-only layout endpoint reports usable
+conventions only when `ready=1`; see [layout observation](NATIVE_AOT_BUILD_PLAN.md#observe-layout-without-enabling-the-backend).
+Offload evidence directories are separate because each fixture owns its test
+root. Add those passing logs to the acceptance record before publication.
 
 For a full export identity check, compare offline copies before starting guests:
 
@@ -196,6 +205,7 @@ or add logs within a completed payload. Retain new run evidence beside it.
 
 The [29 September delivery](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md) includes
 Linux and iOS-input archives made from the prototype. Their hashes and source
-revisions identify those original files; the 2.3.1 source release does not
-relabel or replace them. The [iOS procedure](NATIVE_AOT_IOS.md) uses the seed's
+revisions identify those original files. Subsequent source releases, including
+2.4.1, do not relabel or replace them. The frozen Linux ABI remains unchanged by
+the shared-recovery extraction. The [iOS procedure](NATIVE_AOT_IOS.md) uses the seed's
 exact files and records the additional target checks.

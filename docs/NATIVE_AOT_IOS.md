@@ -4,13 +4,14 @@ The repository can generate Mach-O assembly from retained PIC recordings.
 The iOS app still needs backend configuration, actual fault-adapter installation
 and image linkage before those images can execute. The separate
 [shared-recovery preparation](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md)
-is Linux-validated source scaffolding, not an installed Apple fault path. No accelerated Apple archive has been
-built or tested on a device in this project.
+contains Linux-validated source scaffolding. No existing app scheme installs
+that adapter, and no accelerated Apple archive has been built or device-tested.
 
 Use this procedure on an Apple Silicon Mac after reproducing the
 [Linux AOT build](NATIVE_AOT_BUILD_PLAN.md). Keep the existing gadget-only schemes
-available throughout the work. Source release 2.3.1 includes the handoff tools;
-it leaves the app's execution settings unchanged.
+available throughout the work. Source release 2.4.1 includes the handoff tools,
+shared recovery and read-only layout diagnostics; it leaves the app's execution
+settings unchanged.
 
 ## Inputs and tools
 
@@ -28,7 +29,7 @@ Apple hardware and software versions have not yet been selected or tested.
 brew install meson ninja python
 git clone --recurse-submodules https://github.com/rcarmo/ios-linuxkit.git
 cd ios-linuxkit
-git checkout v2.3.1
+git checkout v2.4.1
 git submodule update --init --recursive
 ```
 
@@ -61,8 +62,9 @@ The following changes require code/build work on the Mac; the named scheme and
 app linkage do not exist yet.
 
 1. Create a separate AOT scheme/configuration. Keep the reference schemes on
-   gadgets. In `app/xcode-meson.sh`, configure that build with `jit=true` and
-   **`jit_emit=false`**. Use separate Meson build directories.
+   gadgets. Add a separate build bridge for `jit=true` and **`jit_emit=false`**;
+   `app/xcode-meson.sh` deliberately resets existing schemes to gadgets, no
+   emitter and no CLI images. Use separate Meson build directories.
 2. Apply matching `ISH_JIT` and guest/frame definitions to every app and library
    translation unit using shared structures. Compare compiler flags, structure
    offsets, pinned registers, entry/prologue and TLB/context constants.
@@ -70,8 +72,8 @@ app linkage do not exist yet.
    `main.c` uses the shared core with CLI gadget replay. The prepared
    `ish_app_native_fault_recover` adapter accepts only native checkpoints and is
    not installed by existing schemes. Integrate it with the real app fault path;
-   fail-stop on FATAL and preserve the prior policy on UNHANDLED. Preserve the real signal/Mach context, exact guest PC, registers, FP/SIMD
-   state and checkpoint lifetime. Unmatched native faults must stop execution.
+   fail-stop on FATAL and preserve the prior policy on UNHANDLED. Preserve the
+   real signal/Mach context, exact guest PC, registers, FP/SIMD state and checkpoint lifetime. Unmatched native faults must stop execution.
 4. Build a bootstrap app binary with the target ABI and exported gadget/backend
    symbols. Do not strip the symbol binary used for generation. `cli_aot` affects
    the CLI only; add generated assembly to app build membership separately.
@@ -94,10 +96,10 @@ intended ARM64 slice with the Apple tools. Collect fields from that build:
 | Field | Type | Source |
 |---|---|---|
 | `binarySha256` | String | SHA-256 of the exact symbol binary supplied to generation. |
-| `abi` | Integer | `jit_abi()` or the ABI printed by the target's `/proc/ish/jit`, converted from hex to an integer. |
-| `prologue_words` | Integer | Debugger observation of `prologue_words` after target JIT initialisation. |
-| `entry_off` | Integer | Target `entry_off()` result for the same configuration. |
-| `n_pinned` | Integer | Initialised target register-pinning count. |
+| `abi` | Integer | `jit_layout_read` or `/proc/ish/jit-layout` with `ready=1` on the target. |
+| `prologue_words` | Integer | Ready target layout diagnostic after normal initialisation. |
+| `entry_off` | Integer | Ready target layout diagnostic for the same configuration. |
+| `n_pinned` | Integer | Ready target register-pinning count. |
 | `arch` | String | `aarch64`. |
 | `endian` | String | `little`. |
 | `pointerBits` | Integer | `64`. |
@@ -105,13 +107,13 @@ intended ARM64 slice with the Apple tools. Collect fields from that build:
 | `evidence` | String | Paths/references to the target logs, debugger observations and build options. |
 
 Do not copy the recording header into the contract. Observe the target with its
-actual SDK and flags. The preparation branch exposes `jit_layout_read` and
+actual SDK and flags. Native builds expose `jit_layout_read` and
 read-only `/proc/ish/jit-layout`. It never initialises the backend or creates
 executable mappings. Accept its convention fields only with `ready=1` after
 normal target initialisation; `ready=0` is not a usable contract. If a no-image
 bootstrap cannot select conventions normally, use matching target recorder/build
-observations rather than copying recording values. A macOS observation applies to that macOS
-build; collect a separate iOS contract before app linkage.
+observations rather than copying recording values. A macOS observation applies
+to that macOS build; collect a separate iOS contract before app linkage.
 
 `requireAppleBinary` checks the thin Mach-O ARM64 header and the declared
 platform name. It does not inspect SDK load commands, entitlements or signing.
@@ -173,7 +175,8 @@ For the exact signed archive, retain:
 - startup, sustained workloads, peak memory, app size, thermals and energy
   compared with the same gadget-only app and guest.
 
-The Linux Python regression is a reason to measure target workloads before
-choosing images for distribution. Assign a fresh Apple build number to every
+Evaluate musl and BusyBox first. Include Python/zlib only when matched target
+workloads justify their timing, footprint and app-size cost; the Linux Python
+regression is a reason to measure rather than assume a benefit. Assign a fresh Apple build number to every
 upload. Publish archive/signing/device evidence with the release record after
 these checks pass.

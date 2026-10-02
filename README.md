@@ -4,7 +4,7 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
-The current source version is **2.4.0** with Apple build number **817**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
+The current source version is **2.4.1** with Apple build number **818**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
 
 ## What is in the repository
 
@@ -12,7 +12,9 @@ The current source version is **2.4.0** with Apple build number **817**. The rep
 - a 48-bit guest address space, Linux syscall layer, signals, sockets and fakefs;
 - the `iSH-ARM64` iOS application target, Ghostty Web terminal frontend and an `iSH-ARM64-ffmpeg` integration target;
 - Linux-host builds for development and regression testing;
-- staged tests for instructions, syscalls, language runtimes and command-line packages.
+- staged tests for instructions, syscalls, language runtimes and command-line packages;
+- startup-only cooperative offload APIs with guest VFS/token ownership and
+  restricted TCP streams; no production cooperative handler registration.
 
 The iOS app is a reference terminal and packaging target. The outer iOS sandbox is the security boundary; read [SECURITY.md](SECURITY.md) before embedding the runtime or exposing guest workloads to untrusted input.
 
@@ -92,11 +94,13 @@ unchanged; ordinary Meson and Xcode configurations keep the gadget engine.
 
 ## Releases and evidence
 
-[2.3.1](docs/reports/releases/IOS_LINUXKIT_2.3.1.md) adds the reusable artifact
-tools and AOT guides, corrects recorder package inventory and preserves staged
-builds when publication encounters an existing output. It retains the execution
-backend and Alpine 3.24.2 pin from [2.3.0](docs/reports/releases/IOS_LINUXKIT_2.3.0.md).
-Apple signing and device validation have not run for the accelerated backend.
+[2.4.1](docs/reports/releases/IOS_LINUXKIT_2.4.1.md) hardens offload setup,
+adds guest-context cooperative execution and restricted TCP cancellation, repairs
+VFS descriptor-allocation rollback, and prepares shared fault recovery/read-only
+layout diagnostics. The bounded local-copy handler is test-only. Existing
+FFmpeg test/legacy behaviour is unchanged; no real FFmpeg or app AOT is enabled.
+The gadget defaults, frozen Linux AOT ABI and Alpine 3.24.2 pin are retained.
+Apple archive/signing/device validation has not run for this source release.
 
 Earlier source releases and dated audits are indexed under
 [reports](docs/reports/README.md). Their measurements apply to the revisions,
@@ -111,6 +115,7 @@ hosts and guests named in each report.
 | [Linux development](docs/LINUX_DEVELOPMENT.md) | Building, fakefs creation, command-line use and diagnostics. |
 | [iOS application](docs/IOS_APPLICATION.md) | Xcode schemes, rootfs packaging and host integration. |
 | [Linux AOT](docs/NATIVE_AOT_BUILD_PLAN.md) | Recording, linking, running, testing and measuring local AOT. |
+| [Native offload](docs/NATIVE_OFFLOAD.md) | Legacy/cooperative contracts, guest VFS, bounded streams and output policy. |
 | [Route-netlink and Tailscale](docs/NETLINK_TAILSCALE.md) | Opt-in host interface discovery and isolated userspace networking tests. |
 | [AOT artifacts](docs/NATIVE_AOT_ARTIFACT_KIT.md) | Freezing, restoring, validating and publishing reusable inputs/builds. |
 | [iOS AOT](docs/NATIVE_AOT_IOS.md) | Target compatibility checks, Mach-O conversion and Apple integration. |

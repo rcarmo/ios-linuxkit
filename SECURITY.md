@@ -10,7 +10,12 @@ Host integrations widen guest access:
 - native offload handlers receive guest-controlled arguments and execute as host code;
 - spawned native mappings execute host programs outside instruction emulation.
 
-Validate paths, arguments and data at each integration boundary. AOT artifact
+Validate paths, arguments and data at each integration boundary. Cooperative
+offload's retained guest VFS and exclusive-output example improve correctness,
+but do not confine hostile host code. Fakefs guest mode bits do not create a
+separate host-user security boundary. Partial output may remain after failure or
+cancellation; callers must not treat it as a committed result. Read
+[offload contracts](docs/NATIVE_OFFLOAD.md) before registering a handler. AOT artifact
 manifests detect file changes but provide no signature or archive sandbox. Use
 trusted archives, verify separately supplied checksums and run native import/build
 tools with normal user privileges.

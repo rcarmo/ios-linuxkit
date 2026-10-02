@@ -47,7 +47,7 @@ need GDB. Optional profiling needs `perf` and permission to sample user events.
 ```sh
 git clone --recurse-submodules https://github.com/rcarmo/ios-linuxkit.git
 cd ios-linuxkit
-git checkout v2.3.1
+git checkout v2.4.1
 git submodule update --init --recursive
 CC=clang make build-arm64-linux RELEASE_BUILD_DIR=build-arm64-gadget
 CC=clang make build-arm64-native NATIVE_BUILD_DIR=build-arm64-recorder
@@ -67,7 +67,7 @@ revision. Choose new paths; do not overwrite an installed userland.
 
 ```sh
 set -eu
-WORK="$HOME/ish-aot-2.3.1"
+WORK="$HOME/ish-aot-2.4.1"
 mkdir "$WORK"
 ROOT="$WORK/training-fakefs"
 RECORDINGS="$WORK/recordings"
@@ -166,7 +166,9 @@ for BUILD in build-arm64-aot build-arm64-aot-debug; do
     ROOTFS_DIR="$ROOT" DEBIAN_ROOTFS_DIR="$ROOT" REPORT_DIR="$WORK" \
     test-arm64-upstream test-arm64-poll-regular test-arm64-fcvt-vector \
     test-arm64-load64-fault-pc test-arm64-proc-mem-seek test-arm64-lseek-width \
-    test-arm64-poke-stress test-arm64-internal-continue-fixtures test-arm64-proc-exit-race
+    test-arm64-poke-stress test-arm64-internal-continue-fixtures test-arm64-proc-exit-race \
+    test-arm64-offload-setup test-arm64-native-fs test-arm64-offload-context \
+    test-arm64-offload-io test-arm64-offload-local-copy
   EVIDENCE_DIR="$WORK/linked-$BUILD" make test-arm64-linked-aot \
     RELEASE_BUILD_DIR="$BUILD" ROOTFS_DIR="$ROOT" AOT_RECORD_DIR="$RECORDINGS"
 done
@@ -179,9 +181,35 @@ bun tests/arm64/native-aot/execution.ts \
 Historical targets use `DEBIAN_ROOTFS_DIR` even for Alpine; set both rootfs
 variables. The full procfs gate runs a native control and two guest repetitions,
 each 25s with 16 forkers and six readers. Keep its progress checks and timeout.
-The emitter harness covers exact native fault/retry state at O0/O2. The separate
+The emitter harness covers exact native fault/retry state at O0/O2, the callable
+native-only app adapter under Linux signals, and read-only diagnostics before/
+after normal init. The separate
 GDB check requires an actual PC hit within each image and a NULL emitter region;
 image-install counters measure lookup results. Execution coverage needs separate measurement.
+
+## Observe layout without enabling the backend
+
+Native builds expose a read-only JSON endpoint:
+
+```sh
+./build-arm64-aot/ish -f "$ROOT" /bin/cat /proc/ish/jit-layout
+```
+
+`jit_layout_read` and `jit_layout_describe` return the compiled CPU/frame/block/
+TLB/context layouts, code version and compile-time emission setting. They do not
+call backend init, allocate, map executable memory or change pinning. Convention
+fields (`abi`, `prologue_words`, `entry_off`, `n_pinned`, `pic`) are usable only
+with `ready=1` after normal backend initialisation. A no-emitter/no-image or
+runtime-off process can report `ready=0` and zero conventions. Readiness does not
+mean images are accepted or code is executing. Gadget builds have no endpoint.
+
+The tested Linux PIC/pinned ABI is `3f650e41`, code version 10, 20 prologue words,
+entry offset 76 and 16 pinned registers. Collect values separately for a different
+build; never relabel recordings. An Apple contract additionally requires actual
+SDK/platform, binary SHA-256 and calling-context evidence. The
+[shared-recovery report](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md)
+records Linux exact restart and native-only app-adapter tests; the app adapter
+is not installed by existing schemes.
 
 ## Measure and update
 
