@@ -77,15 +77,18 @@ Cold Go caches can exceed the ordinary timeout because Alpine may ship standard-
 
 ## CLI and native fault recovery
 
-`test-arm64-upstream` calls the real CLI handler with eight synthetic
+`test-arm64-upstream` checks the read-only native layout endpoint (absent on
+gadget builds) and calls the real CLI handler/shared fault core with eight synthetic
 SIGSEGV/SIGBUS contexts to check read/write fields, precise/fallback PC and
 SP/trampoline handoff. The [2.2.2 record](reports/releases/IOS_LINUXKIT_2.2.2.md)
 contains the original wrong-width store regression.
 
 `test-arm64-native-emitter` uses actual Linux faults to check exact native
 restart at O0/O2, prefix side effects, register/memory results and ABI rejection.
-Both checks apply to the CLI. Apple app fault recovery needs the implementation
-and device tests in [iOS AOT](NATIVE_AOT_IOS.md).
+The native tests also exercise the uninstalled app adapter under Linux
+SA_SIGINFO, plus read-only layout diagnostics before/after normal initialisation.
+These do not prove Apple context or app integration. Apple app fault recovery
+needs adapter installation and device tests in [iOS AOT](NATIVE_AOT_IOS.md).
 
 ## Runtime coverage stages
 

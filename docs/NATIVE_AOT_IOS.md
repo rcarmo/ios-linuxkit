@@ -1,8 +1,10 @@
 # Prepare AOT images for iOS
 
 The repository can generate Mach-O assembly from retained PIC recordings.
-The iOS app still needs backend configuration, precise fault recovery and image
-linkage before those images can execute. No accelerated Apple archive has been
+The iOS app still needs backend configuration, actual fault-adapter installation
+and image linkage before those images can execute. The separate
+[shared-recovery preparation](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md)
+is Linux-validated source scaffolding, not an installed Apple fault path. No accelerated Apple archive has been
 built or tested on a device in this project.
 
 Use this procedure on an Apple Silicon Mac after reproducing the
@@ -65,8 +67,10 @@ app linkage do not exist yet.
    translation unit using shared structures. Compare compiler flags, structure
    offsets, pinned registers, entry/prologue and TLB/context constants.
 3. Connect native precise-fault recovery to the app's actual Apple fault path.
-   `main.c` handles the Linux/Darwin CLI; the application needs its own integration.
-   Preserve the real signal/Mach context, exact guest PC, registers, FP/SIMD
+   `main.c` uses the shared core with CLI gadget replay. The prepared
+   `ish_app_native_fault_recover` adapter accepts only native checkpoints and is
+   not installed by existing schemes. Integrate it with the real app fault path;
+   fail-stop on FATAL and preserve the prior policy on UNHANDLED. Preserve the real signal/Mach context, exact guest PC, registers, FP/SIMD
    state and checkpoint lifetime. Unmatched native faults must stop execution.
 4. Build a bootstrap app binary with the target ABI and exported gadget/backend
    symbols. Do not strip the symbol binary used for generation. `cli_aot` affects
@@ -101,8 +105,12 @@ intended ARM64 slice with the Apple tools. Collect fields from that build:
 | `evidence` | String | Paths/references to the target logs, debugger observations and build options. |
 
 Do not copy the recording header into the contract. Observe the target with its
-actual SDK and flags. If the bootstrap cannot expose the ABI safely, add a
-read-only layout diagnostic first. A macOS observation applies to that macOS
+actual SDK and flags. The preparation branch exposes `jit_layout_read` and
+read-only `/proc/ish/jit-layout`. It never initialises the backend or creates
+executable mappings. Accept its convention fields only with `ready=1` after
+normal target initialisation; `ready=0` is not a usable contract. If a no-image
+bootstrap cannot select conventions normally, use matching target recorder/build
+observations rather than copying recording values. A macOS observation applies to that macOS
 build; collect a separate iOS contract before app linkage.
 
 `requireAppleBinary` checks the thin Mach-O ARM64 header and the declared

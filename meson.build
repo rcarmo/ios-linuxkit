@@ -75,6 +75,8 @@ emu_src += [
     'asbestos/guest-arm64/gen.c',
     'asbestos/guest-arm64/crypto_helpers.c',
     'asbestos/helpers.c',
+    'platform/native_fault.c',
+    'platform/native_fault_app.c',
     gadgets+'/entry.S',
     gadgets+'/memory.S',
     gadgets+'/control.S',
@@ -190,7 +192,7 @@ if get_option('kernel') == 'ish'
     ish = declare_dependency(
         link_with: [libish, libish_emu, libfakefs],
         dependencies: dependencies,
-        # main.c checks its recovery fields against the generated assembly ABI.
+        # Shared fault recovery checks fields against the generated assembly ABI.
         sources: offsets,
         include_directories: includes)
 

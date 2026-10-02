@@ -98,6 +98,9 @@ if [[ " ${HOST_DEFS[*]} " == *-DISH_JIT=1* ]]; then
     check "$TMP/native-links.log" "native-refused-link-invalidation-ok" "$TMP/native-links"
 fi
 check "$TMP/jit-crash-context.log" 'jit-crash-context-ok cases=8' "$TMP/jit-crash-context"
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/jit-layout-proc.c" "${libs[@]}" -o "$TMP/jit-layout-proc"
+check "$TMP/jit-layout-proc.log" 'jit-layout-proc-ok' "$TMP/jit-layout-proc"
 check "$TMP/native-subms.log" ', 0 failed' "$TMP/subms"
 check "$TMP/native-open-unlink.log" '8/8 workers clean' "$TMP/open-unlink"
 for mode in sleep proc orphan; do

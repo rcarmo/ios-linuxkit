@@ -108,6 +108,21 @@ int jit_crash_recover(void *ucontext);
 // writes the code region.
 void jit_report(void);
 
+// Read-only target contract. Never initialises the backend, allocates/maps code,
+// reads environment or changes pinning. Convention fields are zero until normal
+// backend initialisation has published them; layouts always reflect this build.
+struct jit_layout {
+    uint32_t ready, abi, code_version, emission_compiled;
+    uint32_t prologue_words, entry_off, n_pinned, pic;
+    uint64_t cpu_size, frame_size, block_size, tlb_entry_size;
+    uint64_t cpu_pc, cpu_regs, cpu_fp, cpu_cycle;
+    uint64_t frame_exit_sp, frame_saved_pc, fault_host_pc, fault_guest_pc, fault_addr, fault_write;
+    uint64_t block_code, block_native_entry, ctx_block, ctx_slot, ctx_far;
+    uint32_t pointer_bits, little_endian;
+};
+int jit_layout_read(struct jit_layout *layout); // -1 for NULL, 0 otherwise
+size_t jit_layout_describe(char *buf, size_t size); // bounded JSON, no initialisation
+
 // Human-readable state for /proc/ish/jit (mode, AOT images, hits per module).
 size_t jit_describe(char *buf, size_t size);
 // Writes to /proc/ish/jit: "off" / "on" stop / resume installing AOT images

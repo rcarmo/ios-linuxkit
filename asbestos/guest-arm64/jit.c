@@ -53,6 +53,7 @@ static bool loop_off;     // ISH_JIT_LOOP=0: no register promotion in self-loops
 static bool simd_on;      // ISH_JIT_SIMD=0: leave SIMD/FP instructions to the gadgets
 static bool pin_on;       // ISH_JIT_PIN=0: no guest registers pinned in host registers
 static bool pic_on;       // ISH_JIT_PIC=1: position-independent code (see "PIC" below)
+static atomic_bool layout_ready; // release-published immutable convention fields
 static bool aot_only;     // ISH_JIT_AOT_ONLY=1: install AOT translations, translate nothing
                           // (what a build without the JIT would run)
 
@@ -3218,6 +3219,59 @@ int jit_control(const char *cmd, size_t len) {
     return -1;
 }
 
+// Target diagnostics must not call pthread_once/jit_init: a bootstrap query
+// cannot authorise executable mappings or invent conventions from a recording.
+int jit_layout_read(struct jit_layout *out) {
+    if(!out) return -1;
+    struct jit_layout v={
+        .code_version=JIT_CODE_VERSION,
+#ifndef ISH_JIT_NO_EMIT
+        .emission_compiled=1,
+#endif
+        .cpu_size=sizeof(struct cpu_state), .frame_size=sizeof(struct fiber_frame),
+        .block_size=sizeof(struct fiber_block), .tlb_entry_size=sizeof(struct tlb_entry),
+        .cpu_pc=offsetof(struct cpu_state,pc), .cpu_regs=offsetof(struct cpu_state,regs),
+        .cpu_fp=offsetof(struct cpu_state,fp), .cpu_cycle=offsetof(struct cpu_state,cycle),
+        .frame_exit_sp=offsetof(struct fiber_frame,jit_exit_sp), .frame_saved_pc=offsetof(struct fiber_frame,jit_saved_pc),
+        .fault_host_pc=offsetof(struct fiber_frame,native_fault_host_pc),
+        .fault_guest_pc=offsetof(struct fiber_frame,native_fault_guest_pc),
+        .fault_addr=offsetof(struct fiber_frame,native_fault_addr), .fault_write=offsetof(struct fiber_frame,native_fault_write),
+        .block_code=offsetof(struct fiber_block,code), .block_native_entry=offsetof(struct fiber_block,native_entry),
+        .ctx_block=CTX_BLK, .ctx_slot=CTX_SLOT, .ctx_far=CTX_FAR,
+        .pointer_bits=sizeof(void *)*8,
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+        .little_endian=1,
+#endif
+    };
+    if(atomic_load_explicit(&layout_ready,memory_order_acquire)) {
+        v.ready=1; v.abi=jit_abi(); v.prologue_words=prologue_words;
+        v.entry_off=entry_off(); v.n_pinned=n_pinned; v.pic=pic_on;
+    }
+    *out=v; return 0;
+}
+size_t jit_layout_describe(char *buf,size_t size) {
+    if(!buf || !size) return 0;
+    struct jit_layout v; jit_layout_read(&v);
+    int n=snprintf(buf,size,
+        "{\"ready\":%u,\"abi\":%u,\"code_version\":%u,\"emission_compiled\":%u,"
+        "\"prologue_words\":%u,\"entry_off\":%u,\"n_pinned\":%u,\"pic\":%u,"
+        "\"pointerBits\":%u,\"little_endian\":%u,\"arch\":\"aarch64\","
+        "\"cpu_size\":%llu,\"frame_size\":%llu,\"block_size\":%llu,\"tlb_entry_size\":%llu,"
+        "\"cpu_pc\":%llu,\"cpu_regs\":%llu,\"cpu_fp\":%llu,\"cpu_cycle\":%llu,"
+        "\"frame_exit_sp\":%llu,\"frame_saved_pc\":%llu,\"fault_host_pc\":%llu,"
+        "\"fault_guest_pc\":%llu,\"fault_addr\":%llu,\"fault_write\":%llu,"
+        "\"block_code\":%llu,\"block_native_entry\":%llu,\"ctx_block\":%llu,\"ctx_slot\":%llu,\"ctx_far\":%llu}\n",
+        v.ready,v.abi,v.code_version,v.emission_compiled,v.prologue_words,v.entry_off,v.n_pinned,v.pic,
+        v.pointer_bits,v.little_endian,
+        (unsigned long long)v.cpu_size,(unsigned long long)v.frame_size,(unsigned long long)v.block_size,(unsigned long long)v.tlb_entry_size,
+        (unsigned long long)v.cpu_pc,(unsigned long long)v.cpu_regs,(unsigned long long)v.cpu_fp,(unsigned long long)v.cpu_cycle,
+        (unsigned long long)v.frame_exit_sp,(unsigned long long)v.frame_saved_pc,(unsigned long long)v.fault_host_pc,
+        (unsigned long long)v.fault_guest_pc,(unsigned long long)v.fault_addr,(unsigned long long)v.fault_write,
+        (unsigned long long)v.block_code,(unsigned long long)v.block_native_entry,(unsigned long long)v.ctx_block,
+        (unsigned long long)v.ctx_slot,(unsigned long long)v.ctx_far);
+    return n<0 ? 0 : (size_t)n<size ? (size_t)n : size-1;
+}
+
 // /proc/ish/jit: what runs and whether the AOT images are being used.
 size_t jit_describe(char *buf, size_t size) {
     size_t n = 0;
@@ -3341,6 +3395,7 @@ static void jit_init(void) {
     if (!have_region)
         pic_on = true;
     pin_init(pin_on);
+    atomic_store_explicit(&layout_ready,true,memory_order_release);
     cm_on = getenv("ISH_JIT_MAP") != NULL;
     rec_file = pic_on && have_region ? getenv("ISH_JIT_RECORD") : NULL;
     rec_mod = getenv("ISH_JIT_RECORD_MOD") ? getenv("ISH_JIT_RECORD_MOD") : "ld-musl";

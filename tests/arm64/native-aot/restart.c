@@ -22,8 +22,12 @@ static void fiber_fix_fault_pc(struct asbestos *a, struct fiber_frame *f, struct
 #undef ucontext_t
 extern int restart_call(void *,struct fiber_frame *,void *,void *);
 static volatile sig_atomic_t faults;
+static bool app_adapter;
 static void signal_adapter(int sig, siginfo_t *si, void *ctx) {
-    crash_handler(sig,si,ctx);
+    if(app_adapter) {
+        enum ish_fault_result r=ish_app_native_fault_recover(sig,si,ctx);
+        if(r!=ISH_FAULT_REDIRECTED) _exit(139);
+    } else crash_handler(sig,si,ctx);
     faults++;
 }
 static void init_em(struct em *e) {
@@ -188,5 +192,12 @@ int main(int argc, char **argv) {
         run_case(mode,0xad400480,false,32,false,false,true,fused); // ldp q0,q1,[x4]
         run_case(mode,0xad000480,true,32,false,false,true,fused); // stp q0,q1,[x4]
     }
-    rejected_pc_test();abi_test();printf("jit-restart-ok cases=%u actual faults, no duplicate prefix, exact PC/address/writeback, PIC/AOT relocation\n",cases);
+    rejected_pc_test();
+    app_adapter=true;
+    for(unsigned mode=0;mode<5;mode++) {
+        run_case(mode,0xf9400083,false,8,false,false,false,true);
+        run_case(mode,0xf9000083,true,8,false,false,false,true);
+    }
+    rejected_pc_test();
+    abi_test();printf("jit-restart-ok cases=%u actual faults, no duplicate prefix, exact PC/address/writeback, PIC/AOT relocation\n",cases);
 }

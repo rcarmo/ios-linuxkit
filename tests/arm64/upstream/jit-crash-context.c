@@ -48,6 +48,42 @@ static void one_case(int sig, bool write_fault, bool precise) {
     sigset_t before, after;
     assert(sigprocmask(SIG_SETMASK, NULL, &before) == 0);
     in_jit = 1;
+    // An uninstalled app adapter must never replay a gadget fault or mutate
+    // frame/context/signal mask. CLI fallback remains separately admitted.
+    struct fiber_frame untouched_frame; memcpy(&untouched_frame,&frame,sizeof(frame));
+    ucontext_t untouched=uc;
+#ifdef __APPLE__
+    struct __darwin_mcontext64 untouched_mc=mc;
+#endif
+    assert(ish_app_native_fault_recover(sig,&info,&uc)==ISH_FAULT_UNHANDLED);
+    assert(!memcmp(&uc,&untouched,sizeof(uc)));
+#ifdef __APPLE__
+    assert(!memcmp(&mc,&untouched_mc,sizeof(mc)));
+#endif
+    assert(!memcmp(&frame,&untouched_frame,sizeof(frame)));
+    sigset_t app_mask; assert(sigprocmask(SIG_SETMASK,NULL,&app_mask)==0);
+    for(int signo=1;signo<NSIG;signo++) assert(sigismember(&app_mask,signo)==sigismember(&before,signo));
+#ifdef ISH_JIT
+    // Exact checkpoint context: malformed x1 must fail-stop without mutation.
+    frame.native_fault_host_pc=0x123450;
+    frame.native_fault_guest_pc=0x345600;
+    frame.native_fault_addr=0x6789;
+    frame.native_fault_write=1;
+    jit_active_frame=&frame;
+    host_ctx_aarch64_set_pc(&uc,frame.native_fault_host_pc);
+#ifdef __APPLE__
+    mc.__ss.__x[1]=0;
+#else
+    uc.uc_mcontext.regs[1]=0;
+#endif
+    assert(ish_app_native_fault_recover(sig,&info,&uc)==ISH_FAULT_FATAL);
+    assert(frame.native_fault_host_pc==0x123450 && frame.cpu.pc==untouched_frame.cpu.pc);
+    memcpy(&frame,&untouched_frame,sizeof(frame)); jit_active_frame=NULL;
+    uc=untouched;
+#ifdef __APPLE__
+    mc=untouched_mc;
+#endif
+#endif
     crash_handler(sig, &info, &uc);
     in_jit = 0;
     // The handler normally unblocks its signal before returning to a

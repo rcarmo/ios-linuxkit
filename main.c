@@ -20,6 +20,7 @@
 #endif
 #include "asbestos/asbestos.h"
 #include "platform/host_context_aarch64.h"
+#include "platform/native_fault.h"
 #include "xX_main_Xx.h"
 
 // Thread-local JIT recovery state (defined in asbestos.c)
@@ -39,92 +40,19 @@ int fakefs_bind_mount(const char *linux_path, const char *host_path, bool read_o
 // Assembly trampoline: returns INT_JIT_CRASH via fiber_exit (defined in entry.S)
 extern void jit_crash_trampoline(void);
 
-// Offsets needed by the async crash handler. Keep these derived from the C
-// structs instead of hard-coding cpu-offsets.h values; the signal handler runs
-// in C, and stale constants here corrupt JIT crash recovery when cpu_state or
-// fiber_frame changes.
-#define CRASH_CPU_pc offsetof(struct cpu_state, pc)
-#define CRASH_CPU_segfault_addr offsetof(struct cpu_state, segfault_addr)
-#define CRASH_CPU_segfault_was_write offsetof(struct cpu_state, segfault_was_write)
-#define CRASH_LOCAL_jit_exit_sp offsetof(struct fiber_frame, jit_exit_sp)
-#define CRASH_LOCAL_jit_saved_pc offsetof(struct fiber_frame, jit_saved_pc)
-
-// The assembly recovery path consumes these same fields. Make layout drift a
-// build failure, including the local precise-retry slot (not present upstream).
-#include "cpu-offsets.h"
-_Static_assert(CRASH_CPU_pc == CPU_pc, "cpu-offsets drift: pc");
-_Static_assert(CRASH_CPU_segfault_addr == CPU_segfault_addr, "cpu-offsets drift: segfault_addr");
-_Static_assert(CRASH_CPU_segfault_was_write == CPU_segfault_was_write, "cpu-offsets drift: segfault_was_write");
-_Static_assert(CRASH_LOCAL_jit_exit_sp == LOCAL_jit_exit_sp, "cpu-offsets drift: jit_exit_sp");
-_Static_assert(CRASH_LOCAL_jit_saved_pc == LOCAL_jit_saved_pc, "cpu-offsets drift: jit_saved_pc");
-
+// CLI adapter retains its existing gadget replay and signal-mask policy.
 static void crash_handler(int sig, siginfo_t *info, void *ctx) {
-#ifdef __aarch64__
-    // If we're inside JIT code and got SIGSEGV/SIGBUS, recover by redirecting
-    // execution to jit_crash_trampoline via ucontext PC manipulation.
-    // This avoids the overhead of _setjmp on every block entry.
-    if ((sig == SIGSEGV || sig == SIGBUS) && in_jit) {
-        ucontext_t *uc = (ucontext_t *)ctx;
-
-        // _cpu is in x1 — pointer to cpu_state within fiber_frame
-        int native_recovered = 0;
-#ifdef ISH_JIT
-        native_recovered = jit_crash_recover(uc);
-        if (native_recovered < 0) {
-            static const char message[] = "unrecoverable native JIT/AOT fault\n";
-            (void) write(STDERR_FILENO, message, sizeof(message)-1);
-            _exit(139);
-        }
-#endif
-        uint64_t cpu_ptr = host_ctx_aarch64_reg(uc, 1);
-
-        // Reconstruct guest segfault_addr from registers.
-        // x7 = _addr (host pointer = data_minus_addr + guest_addr)
-        // x10 may hold data_minus_addr from TLB lookup (but only on TLB HIT path)
-        uint64_t x7 = host_ctx_aarch64_reg(uc, 7);
-        uint64_t x10 = host_ctx_aarch64_reg(uc, 10);
-        uint64_t guest_addr = (x7 - x10) & 0xffffffffffffULL;
-
-        // Store diagnostic info for handle_interrupt to read
-        jit_last_host_fault = (uint64_t)info->si_addr;
-        jit_last_x7 = x7;
-        jit_last_x10 = x10;
-        jit_crash_count++;
-
-        // Determine read/write from the host signal ABI when available.
-        int was_write = host_ctx_aarch64_fault_was_write(uc, info);
-
-        // Write crash info directly to cpu_state via _cpu pointer
-        if (!native_recovered) {
-            *(addr_t *)(cpu_ptr + CRASH_CPU_segfault_addr) = guest_addr;
-            *(bool *)(cpu_ptr + CRASH_CPU_segfault_was_write) = (bool)was_write;
-            // Restore guest PC to the latest faultable guest instruction for
-            // re-execution. This is usually more precise than the block-start TLS
-            // fallback and avoids re-running earlier side effects in the block.
-            uint64_t retry_pc = *(uint64_t *)(cpu_ptr + CRASH_LOCAL_jit_saved_pc);
-            if (retry_pc == 0)
-                retry_pc = (uint64_t)jit_saved_pc;
-            *(uint64_t *)(cpu_ptr + CRASH_CPU_pc) = retry_pc;
-        }
-
-        // Restore SP to the value saved by fiber_enter, so fiber_exit
-        // can correctly pop the callee-saved register frame.
-        uint64_t exit_sp = *(uint64_t *)(cpu_ptr + CRASH_LOCAL_jit_exit_sp);
-        host_ctx_aarch64_set_sp(uc, exit_sp);
-
-        // Redirect execution to crash trampoline (returns INT_JIT_CRASH)
-        host_ctx_aarch64_set_pc(uc, (uint64_t)jit_crash_trampoline);
-
-        // Unblock signal so it can fire again on next crash
-        sigset_t unblock;
-        sigemptyset(&unblock);
-        sigaddset(&unblock, sig);
-        sigprocmask(SIG_UNBLOCK, &unblock, NULL);
-
-        // Signal handler returns; execution resumes at jit_crash_trampoline
+    enum ish_fault_result recovered=ish_native_fault_recover(sig,info,ctx,1);
+    if(recovered==ISH_FAULT_FATAL) {
+        static const char message[]="unrecoverable native JIT/AOT fault\n";
+        (void)write(STDERR_FILENO,message,sizeof(message)-1);
+        _exit(139);
+    }
+    if(recovered==ISH_FAULT_REDIRECTED) {
+        sigset_t unblock; sigemptyset(&unblock); sigaddset(&unblock,sig);
+        sigprocmask(SIG_UNBLOCK,&unblock,NULL);
         return;
     }
-#endif
 
     // Non-JIT crash: dump state and exit
     char buf[512];

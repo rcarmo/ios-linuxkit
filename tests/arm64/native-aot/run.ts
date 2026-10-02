@@ -16,7 +16,7 @@ function slice(source: string, start: string, end: string) {
     return source.slice(a, b);
 }
 const main = await Bun.file(join(root, 'main.c')).text();
-await Bun.write(join(out, 'cli-recovery.c'), slice(main, '#define CRASH_CPU_pc', 'static struct termios saved_termios'));
+await Bun.write(join(out, 'cli-recovery.c'), '#include "platform/native_fault.h"\n#include "platform/native_fault.c"\n#include "platform/native_fault_app.c"\n' + slice(main, 'static void crash_handler(', 'static struct termios saved_termios'));
 const dispatch = await Bun.file(join(root, 'asbestos/asbestos.c')).text();
 const tlb = await Bun.file(join(root, 'emu/tlb.c')).text();
 await Bun.write(join(out, 'dispatch-recovery.c'), `
@@ -35,6 +35,10 @@ for (const opt of ['-O0', '-O2']) {
     const flags = ['-std=gnu11', opt, '-g', '-DGUEST_ARM64=1', '-DISH_JIT=1',
         '-DISH_JIT_NO_EMIT=1', '-I'+root, '-I'+build, '-I'+out,
         '-ffunction-sections', '-fdata-sections', '-Wno-unused-function', '-Wl,--gc-sections', '-pthread'];
+    const layout = join(out, 'layout' + opt);
+    run([process.env.CC || 'clang', ...flags, join(import.meta.dir, 'layout.c'),
+        '-Wl,--wrap=malloc', '-Wl,--wrap=calloc', '-Wl,--wrap=mmap', '-o', layout]);
+    for (const mode of ['empty', 'off', 'init']) run(['timeout', '-k', '2', '30', layout, mode]);
     for (const [name, sources] of [
         ['restart', ['restart.c', 'restart-call.S']],
         ['preservation', ['preservation.c', 'call.S', 'diff-call.S']],

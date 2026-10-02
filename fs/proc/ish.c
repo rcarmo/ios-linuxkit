@@ -170,6 +170,12 @@ static int proc_ish_jit_show(struct proc_entry *UNUSED(entry), struct proc_data 
     free(text);
     return 0;
 }
+static int proc_ish_jit_layout_show(struct proc_entry *UNUSED(entry), struct proc_data *buf) {
+    char text[2048];
+    jit_layout_describe(text,sizeof(text));
+    proc_printf(buf,"%s",text);
+    return 0;
+}
 static ssize_t proc_ish_jit_update(struct proc_entry *UNUSED(entry), struct proc_data *buf,
                                   off_t UNUSED(offset)) {
     return jit_control(buf->data, buf->size) ? (ssize_t)buf->size : _EINVAL;
@@ -178,6 +184,7 @@ static ssize_t proc_ish_jit_update(struct proc_entry *UNUSED(entry), struct proc
 struct proc_children proc_ish_children = PROC_CHILDREN({
 #ifdef ISH_JIT
     {"jit", S_IFREG | 0644, .show = proc_ish_jit_show, .pwrite = proc_ish_jit_update},
+    {"jit-layout", S_IFREG | 0444, .show = proc_ish_jit_layout_show},
 #endif
     {"colors", .show = proc_ish_show_colors},
     {".defaults", S_IFDIR, .readdir = proc_ish_underlying_defaults_readdir},
