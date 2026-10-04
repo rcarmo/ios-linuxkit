@@ -4,6 +4,20 @@
 
 `ios-linuxkit` runs an AArch64 Linux userland inside an iOS app and as a command-line process on an AArch64 Linux host. It derives from [iSH](https://ish.app/) and uses iSH's userspace kernel, filesystems and Asbestos threaded-code interpreter.
 
+**Read the announcement: [Announcing ios-linuxkit: Linux on iPad, the Hard Way](https://taoofmac.com/space/blog/2026/05/16/1130).**
+
+## Why this exists
+
+> I’m done waiting for Apple to fix things. And one of the things I think should exist is a decent way to run Linux binaries on my iPad.
+
+An expensive iPad has hardware capable of far more than iOS allows: a cheap ARM board can run containers and virtual machines, while Apple keeps hypervisor access locked away. A POSIX shell, a package manager and local development tools should not require a jailbreak, a remote server or Apple's permission to use hardware you own.
+
+The aim is to run shells, compilers, language runtimes and agent/CLI tools **locally**, with the workspace on the device—not through a UI proxied from somewhere else. The default interpreter works within iOS's restrictions without JIT, RWX memory or `MAP_JIT`; it trades native speed for a usable Linux environment.
+
+This is a reusable runtime kit. The terminal is a reference shell; the runtime and reproducible Linux-host tests are there so other developers can build better tools. I have no plans to publish it on the App Store myself. The point is to keep it open, fixable and useful on our own devices.
+
+## Current state
+
 The current source version is **2.4.1** with Apple build number **818**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The iOS schemes do not yet enable that backend.
 
 ## What is in the repository
