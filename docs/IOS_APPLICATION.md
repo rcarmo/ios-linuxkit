@@ -24,8 +24,12 @@ Change the upstream default `ROOT_BUNDLE_IDENTIFIER` in `app/iSH.xcconfig` to an
 
 | Scheme | Product | Purpose |
 |---|---|---|
-| `iSH-ARM64` | `iSH ARM64.app` | Main reference application. |
+| `iSH-ARM64` | `LinuxKit.app` | Main reference application. |
 | `iSH-ARM64-ffmpeg` | `iSH ARM64 ffmpeg.app` | Test target that defines `ISH_FFMPEG_TEST=1` and registers the built-in fake FFmpeg handler. |
+
+The main product name comes from `app/App.xcconfig`; the scheme still contains
+the historical `iSH ARM64.app` display label. Packaging must use the evaluated
+`PRODUCT_NAME`, `EXECUTABLE_NAME` and bundle identifiers from Xcode build settings.
 
 Build from Xcode, or use `xcodebuild` with a configured destination and signing identity:
 
@@ -40,6 +44,12 @@ xcodebuild \
 
 The exact signing arguments depend on the developer account. A simulator build can use a simulator destination; device and archive builds require valid signing settings. These Xcode commands have not been run on the Debian validation host.
 
+There is no supported `make ipa`/`ldid` fakesigning workflow in this repository.
+Fakesigning alone does not provide the provisioning or app-group entitlements
+required for installation on an ordinary non-jailbroken device. App and embedded
+extension identifiers, entitlements and signing must agree with the installation
+method. No prebuilt IPA or sideloading support is promised.
+
 ## Meson libraries
 
 The ARM64 target runs the `Build Meson (ARM64)` shell phase. `app/xcode-meson.sh` creates a Darwin cross file for the active Xcode architectures and configures:
@@ -52,6 +62,11 @@ jit=false
 jit_emit=false
 cli_aot=[]
 ```
+
+ARM64 Darwin Meson builds define `_XOPEN_SOURCE=700` and `_DARWIN_C_SOURCE`
+to expose the POSIX/Darwin declarations used by host-context code. Other host
+combinations do not receive these flags. `make test-darwin-feature-macros` checks
+that scope using Meson and a local compiler; it is not an Apple SDK build.
 
 The bridge resets all three native/image settings together in fresh and reused
 build directories; configuration failure propagates. An environment override

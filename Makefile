@@ -88,7 +88,10 @@ test-arm64-native-emitter: build-arm64-native
 test-aot-generator:
 	bun test tests/arm64/native-aot/generator.test.ts
 
-.PHONY: test-aot-kit test-xcode-gadget-guard
+.PHONY: test-aot-kit test-xcode-gadget-guard test-darwin-feature-macros
+test-darwin-feature-macros:
+	bun test --timeout 60000 tests/host/darwin-feature-macros.test.ts
+
 test-aot-kit:
 	bun test tests/arm64/native-aot/kit.test.ts
 

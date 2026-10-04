@@ -2,6 +2,11 @@ project('ish', 'c',
     default_options: ['default_library=static', 'c_std=gnu11', 'warning_level=2'])
 cc = meson.get_compiler('c')
 
+# Expose the Darwin/POSIX declarations used by the ARM64 host context helpers.
+if host_machine.system() == 'darwin' and host_machine.cpu_family() == 'aarch64'
+    add_project_arguments('-D_XOPEN_SOURCE=700', '-D_DARWIN_C_SOURCE', language: 'c')
+endif
+
 if cc.get_id() == 'clang'
     add_project_arguments('-Wimplicit-fallthrough', '-Wtautological-constant-in-range-compare', language: 'c')
 endif

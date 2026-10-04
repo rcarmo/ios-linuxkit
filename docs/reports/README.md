@@ -20,6 +20,8 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [Documentation review — 30 September 2026](audits/DOCUMENTATION_REVIEW_2026-09-30.md) records the 13-guide source/command review, technical-writing rules and validation for 2.3.1.
 
+[GitHub issue/PR triage](audits/GITHUB_TRIAGE_2026-10-04.md) records the scoped Darwin feature-macro fix, local regression checks and unsupported IPA/custom-output submission boundaries. Apple SDK/device compilation and installation remain unverified.
+
 [2.4.1 patch source release](releases/IOS_LINUXKIT_2.4.1.md) includes the validated default-off offload and shared-recovery tranches, VFS allocation repair and maintained-guide refresh. No production cooperative handler or app AOT is enabled.
 
 [Shared native recovery preparation](audits/SHARED_NATIVE_RECOVERY_2026-10-02.md) records the separate CLI/uninstalled-app adapters and read-only layout diagnostics, Linux exact-fault tests and unchanged frozen-image ABI. Actual Apple integration remains blocked on SDK/device gates.
