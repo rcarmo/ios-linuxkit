@@ -1,8 +1,10 @@
 # Prepare AOT images for iOS
 
 The repository can generate Mach-O assembly from retained PIC recordings.
-The iOS app still needs backend configuration, actual fault-adapter installation
-and image linkage before those images can execute. The separate
+An isolated `iSH-ARM64-AOT-Bootstrap` target now compiles the native backend
+with no runtime emitter, retains its symbols and runs gadgets only. The iOS app
+still needs actual fault-adapter installation and validated image linkage before
+those images can execute. The separate
 [shared-recovery preparation](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md)
 contains Linux-validated source scaffolding. No existing app scheme installs
 that adapter, and no accelerated Apple archive has been built or device-tested.
@@ -10,8 +12,8 @@ that adapter, and no accelerated Apple archive has been built or device-tested.
 Use this procedure on an Apple Silicon Mac after reproducing the
 [Linux AOT build](NATIVE_AOT_BUILD_PLAN.md). Keep the existing gadget-only schemes
 available throughout the work. Source release 2.4.1 includes the handoff tools,
-shared recovery and read-only layout diagnostics; it leaves the app's execution
-settings unchanged.
+shared recovery and read-only layout diagnostics. Reference app execution stays
+on gadgets; the subsequent bootstrap preparation is described below.
 
 ## Inputs and tools
 
@@ -58,20 +60,43 @@ policy.
 
 ## Implement an isolated AOT configuration
 
-The following changes require code/build work on the Mac; the named scheme and
-app linkage do not exist yet.
+The bootstrap is available for Apple compilation and symbol inspection:
 
-1. Create a separate AOT scheme/configuration. Keep the reference schemes on
-   gadgets. Add a separate build bridge for `jit=true` and **`jit_emit=false`**;
-   `app/xcode-meson.sh` deliberately resets existing schemes to gadgets, no
-   emitter and no CLI images. Use separate Meson build directories.
+```sh
+sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/new-derived-data \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+For a signed bootstrap, replace `CODE_SIGNING_ALLOWED=NO` with the configured
+`DEVELOPMENT_TEAM`, `ROOT_BUNDLE_IDENTIFIER` and `-allowProvisioningUpdates`.
+Its `.aot-bootstrap` bundle/app-group suffix keeps its filesystem separate from
+the reference app. The script uses iOS 15 as the minimum for Xcode 27.
+
+The guarded bridge allows `jit=true` only for this target, plain ARM64,
+matching `GUEST_ARM64`, `ISH_JIT`, `ISH_JIT_NO_EMIT`, `ISH_AOT_BOOTSTRAP`
+definitions and a separate `meson-aot-bootstrap` directory. Emission and CLI
+images are always cleared together. Startup forces the backend off; no native
+fault adapter is installed and no images are linked.
+
+`tools/jit_aot/apple.ts inspect` checks the built backend options/definitions,
+known code-mapping/protection symbols, required defined app symbols and the
+actual Mach-O SDK/platform. Non-executable context-data `mmap` is allowed.
+These static checks do not prove runtime memory policy or device correctness.
+The bootstrap layout will report `ready=0`; do not use it to invent conventions.
+
+The accelerated app still requires the following work:
+
+1. Derive an accelerated target from the bootstrap after the recovery and
+   image gates below pass. Keep the reference schemes on gadgets and retain
+   separate Meson directories. Remove the bootstrap's runtime-off guard only
+   when actual native fault recovery and validated image membership exist.
 2. Apply matching `ISH_JIT` and guest/frame definitions to every app and library
    translation unit using shared structures. Compare compiler flags, structure
    offsets, pinned registers, entry/prologue and TLB/context constants.
 3. Connect native precise-fault recovery to the app's actual Apple fault path.
    `main.c` uses the shared core with CLI gadget replay. The prepared
    `ish_app_native_fault_recover` adapter accepts only native checkpoints and is
-   not installed by existing schemes. Integrate it with the real app fault path;
+   not installed by any supplied scheme. Integrate it with the real app fault path;
    fail-stop on FATAL and preserve the prior policy on UNHANDLED. Preserve the
    real signal/Mach context, exact guest PC, registers, FP/SIMD state and checkpoint lifetime. Unmatched native faults must stop execution.
 4. Build a bootstrap app binary with the target ABI and exported gadget/backend
@@ -118,6 +143,19 @@ to that macOS build; collect a separate iOS contract before app linkage.
 `requireAppleBinary` checks the thin Mach-O ARM64 header and the declared
 platform name. It does not inspect SDK load commands, entitlements or signing.
 The operator must verify those against the build record.
+
+After collecting an actual ready/no-emitter/PIC target layout, create a
+binary-bound contract without copying the recording's values:
+
+```sh
+bun tools/jit_aot/apple.ts contract "$APPLE_SYMBOL_BINARY" \
+  /absolute/path/to/observed-layout.json /absolute/path/to/new-contract.json \
+  'Target device, exact build and debugger/log evidence for this observation'
+```
+
+This command reads the SDK/platform from Mach-O load commands and refuses
+`ready=0`, compiled emission, non-PIC conventions and an existing output file.
+The evidence must refer to the same binary; the operator collects that evidence.
 
 ## Generate and inspect Mach-O assembly
 

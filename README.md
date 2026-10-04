@@ -24,7 +24,7 @@ The current source version is **2.4.1** with Apple build number **818**. The rep
 
 - an ARM64 instruction decoder and AArch64 host gadgets under `asbestos/guest-arm64/`;
 - a 48-bit guest address space, Linux syscall layer, signals, sockets and fakefs;
-- the `iSH-ARM64` iOS application target, Ghostty Web terminal frontend and an `iSH-ARM64-ffmpeg` integration target;
+- the `iSH-ARM64` iOS application target, xterm.js terminal frontend (with Ghostty Web also available) and an `iSH-ARM64-ffmpeg` integration target;
 - Linux-host builds for development and regression testing;
 - staged tests for instructions, syscalls, language runtimes and command-line packages;
 - startup-only cooperative offload APIs with guest VFS/token ownership and

@@ -1,6 +1,6 @@
 # Vendored xterm.js runtime
 
-This directory contains the optional xterm.js renderer bundled with `ios-linuxkit`. Builds that include `app/XtermRenderer.xcconfig` load `xterm-term.html`; the default ARM64 app uses the Ghostty Web renderer.
+This directory contains the default xterm.js renderer bundled with `ios-linuxkit`. All ARM64 schemes include `app/XtermRenderer.xcconfig` and load `xterm-term.html`, using Canvas and ligatures. Ghostty Web is also bundled and available by passing `TERMINAL_RENDERER_DEFINES=USE_XTERM_RENDERER=0` to `xcodebuild`.
 
 Vendored packages:
 

@@ -1,7 +1,6 @@
 // Xterm.js Renderer Configuration
-// Include this xcconfig to use the xterm.js terminal renderer instead of Ghostty WebGL.
-// Useful for lower-spec devices where WebAssembly/WebGL is too heavy.
-//
-// Usage: add #include "XtermRenderer.xcconfig" to your target xcconfig.
+// ARM64 apps include this configuration by default (Canvas with ligatures).
+// Override TERMINAL_RENDERER_DEFINES=USE_XTERM_RENDERER=0 to use Ghostty Web.
 
-GCC_PREPROCESSOR_DEFINITIONS = $(inherited) USE_XTERM_RENDERER=1
+TERMINAL_RENDERER_DEFINES = USE_XTERM_RENDERER=1
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) $(TERMINAL_RENDERER_DEFINES)

@@ -1,0 +1,15 @@
+#include "AppARM64.xcconfig"
+
+// Compile and inspect the native ABI without executing unvalidated images.
+PRODUCT_NAME = LinuxKit AOT Bootstrap
+PRODUCT_BUNDLE_IDENTIFIER = $(ROOT_BUNDLE_IDENTIFIER).aot-bootstrap
+PRODUCT_APP_GROUP_IDENTIFIER = group.$(ROOT_BUNDLE_IDENTIFIER).aot-bootstrap
+MESON_BUILD_DIR = $(CONFIGURATION_BUILD_DIR)/meson-aot-bootstrap
+ARCHS = arm64
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) ISH_JIT=1 ISH_JIT_NO_EMIT=1 ISH_AOT_BOOTSTRAP=1
+
+// Keep the symbol binary usable by the checked Mach-O image generator.
+DEAD_CODE_STRIPPING = NO
+STRIP_INSTALLED_PRODUCT = NO
+COPY_PHASE_STRIP = NO
+OTHER_LDFLAGS = $(inherited) -Wl,-u,_ish_aot_register -Wl,-u,_jit_layout_read

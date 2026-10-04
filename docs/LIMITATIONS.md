@@ -117,7 +117,8 @@ validation. Shared recovery includes a callable, uninstalled native-only app
 adapter, not an integrated Apple fault path. Read-only layout diagnostics report
 conventions only after normal backend initialisation (`ready=1`); values from a
 not-ready bootstrap or a Linux binary cannot substitute for an observed Apple
-contract. Existing Xcode schemes use gadgets. [Apple implementation steps](NATIVE_AOT_IOS.md)
+contract. Reference Xcode schemes use gadgets; the AOT bootstrap compiles a
+no-emitter backend but forces native execution off. [Apple implementation steps](NATIVE_AOT_IOS.md)
 list the checks needed before distribution.
 
 ## Release tooling

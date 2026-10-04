@@ -700,6 +700,8 @@
 		9A28E4E9219A8B670073D200 /* AboutAppearanceViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AboutAppearanceViewController.m; sourceTree = "<group>"; };
 		AA0000021F96D90D00FFB7A4 /* iSH ARM64.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iSH ARM64.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000015AF96D90D00FFB7A4 /* AppARM64.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AppARM64.xcconfig; sourceTree = "<group>"; };
+		A07000000000000000000002 /* LinuxKit AOT Bootstrap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "LinuxKit AOT Bootstrap.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A07000000000000000000003 /* AppARM64AOTBootstrap.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AppARM64AOTBootstrap.xcconfig; sourceTree = "<group>"; };
 		AA000131AF96D90D00FFB7A4 /* DebugServer.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = DebugServer.c; sourceTree = "<group>"; };
 		AA000132AF96D90D00FFB7A4 /* DebugServer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DebugServer.h; sourceTree = "<group>"; };
 		AA9C2BB72F44A3DD00F41633 /* iSH ARM64 ffmpeg.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "iSH ARM64 ffmpeg.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -987,6 +989,7 @@
 			children = (
 				BB0B86CD2586FD8800208600 /* App.xcconfig */,
 				AA000015AF96D90D00FFB7A4 /* AppARM64.xcconfig */,
+				A07000000000000000000003 /* AppARM64AOTBootstrap.xcconfig */,
 				40AEF95FC5D957E4D8F5E6A1 /* AppARM64-ffmpeg.xcconfig */,
 				BBEF192C26806546001225BD /* AppLib.xcconfig */,
 				493B378F290F5320000C41ED /* CLI.xcconfig */,
@@ -1165,6 +1168,7 @@
 			children = (
 				BB792B501F96D90D00FFB7A4 /* iSH.app */,
 				AA0000021F96D90D00FFB7A4 /* iSH ARM64.app */,
+				A07000000000000000000002 /* LinuxKit AOT Bootstrap.app */,
 				BB88F4902154760800A341FD /* iSHFileProvider.appex */,
 				BB13F7DC200AD81D003D1C4D /* libish.a */,
 				BBFB2C5B2590257E00545EAB /* libish_emu.a */,
@@ -1532,6 +1536,31 @@
 /* End PBXLegacyTarget section */
 
 /* Begin PBXNativeTarget section */
+		A07000000000000000000001 /* iSH-ARM64-AOT-Bootstrap */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A07000000000000000000004 /* Build configuration list for PBXNativeTarget "iSH-ARM64-AOT-Bootstrap" */;
+			buildPhases = (
+				AA000300AF96D90D00FFB7A4 /* Build Meson (ARM64) */,
+				AA0000081F96D90D00FFB7A4 /* Sources */,
+				AA0000091F96D90D00FFB7A4 /* Frameworks */,
+				AA000011AF96D90D00FFB7A4 /* Download Root */,
+				AA000012AF96D90D00FFB7A4 /* Generate APK Repositories File */,
+				AA000013AF96D90D00FFB7A4 /* Compile JavaScript */,
+				AA000010AF96D90D00FFB7A4 /* Resources */,
+				AA000014AF96D90D00FFB7A4 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+				AA000200AF96D90D00FFB7A4 /* PBXBuildRule */,
+			);
+			dependencies = (
+				AA000060AF96D90D00FFB7A4 /* PBXTargetDependency */,
+				AA000062AF96D90D00FFB7A4 /* PBXTargetDependency */,
+			);
+			name = "iSH-ARM64-AOT-Bootstrap";
+			productName = "LinuxKit AOT Bootstrap";
+			productReference = A07000000000000000000002 /* LinuxKit AOT Bootstrap.app */;
+			productType = "com.apple.product-type.application";
+		};
 		497F6CE3254E5E4C00C82F46 /* MakeXcodeAutoCompleteWork */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 497F6CEA254E5E4C00C82F46 /* Build configuration list for PBXNativeTarget "MakeXcodeAutoCompleteWork" */;
@@ -1903,6 +1932,7 @@
 			projectRoot = "";
 			targets = (
 				AA0000011F96D90D00FFB7A4 /* iSH-ARM64 */,
+				A07000000000000000000001 /* iSH-ARM64-AOT-Bootstrap */,
 				BBEF191D26806364001225BD /* libiSHApp */,
 				BBECF3A12691314C00DEC937 /* libiSHLinux */,
 				BBBDDF802CE00F6A0071F1F3 /* libiSHLinuxUser */,
@@ -2148,7 +2178,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"$SRCROOT/app/xcode-meson.sh\"\ncd \"$MESON_BUILD_DIR\"\n\"$SRCROOT/app/xcode-ninja.sh\" $NINJA_TARGETS\nmkdir -p \"$CONFIGURATION_BUILD_DIR\"\nln -sf \"$MESON_BUILD_DIR/libish.a\" \"$CONFIGURATION_BUILD_DIR/libish.a\"\nln -sf \"$MESON_BUILD_DIR/libish_emu.a\" \"$CONFIGURATION_BUILD_DIR/libish_emu.a\"\nln -sf \"$MESON_BUILD_DIR/libfakefs.a\" \"$CONFIGURATION_BUILD_DIR/libfakefs.a\"\n";
+			shellScript = "/bin/sh \"$SRCROOT/app/xcode-build-arm64.sh\"\n";
 		};
 		BB034E8C263643C10000A498 /* Generate APK Repositories File */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -2706,6 +2736,22 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		A07000000000000000000005 /* Debug-ApplePleaseFixFB19282108 */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A07000000000000000000003 /* AppARM64AOTBootstrap.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+			};
+			name = "Debug-ApplePleaseFixFB19282108";
+		};
+		A07000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A07000000000000000000003 /* AppARM64AOTBootstrap.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+			};
+			name = Release;
+		};
 		497F6CE8254E5E4C00C82F46 /* Debug-ApplePleaseFixFB19282108 */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = BB0B86D52587009D00208600 /* iOS.xcconfig */;
@@ -3323,6 +3369,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A07000000000000000000004 /* Build configuration list for PBXNativeTarget "iSH-ARM64-AOT-Bootstrap" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A07000000000000000000005 /* Debug-ApplePleaseFixFB19282108 */,
+				A07000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		497F6CEA254E5E4C00C82F46 /* Build configuration list for PBXNativeTarget "MakeXcodeAutoCompleteWork" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

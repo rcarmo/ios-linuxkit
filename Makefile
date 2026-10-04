@@ -96,7 +96,7 @@ test-aot-kit:
 	bun test tests/arm64/native-aot/kit.test.ts
 
 test-xcode-gadget-guard:
-	bun test tests/arm64/native-aot/xcode-guard.test.ts
+	bun test tests/arm64/native-aot/xcode-guard.test.ts tests/arm64/native-aot/apple.test.ts
 
 test-arm64-linked-aot:
 	ISH_BIN="$(abspath $(RELEASE_BUILD_DIR))/ish" ROOTFS="$(ROOTFS_DIR)" AOT_RECORD_DIR="$(AOT_RECORD_DIR)" bash tests/arm64/native-aot/run-linked.sh

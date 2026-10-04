@@ -23,8 +23,8 @@ Packages:
 All MIT licensed by the xterm.js authors.
 
 Build switch:
-- Default (Ghostty): loads term.html → ghostty-web.js + term.js
-- Xterm.js: include XtermRenderer.xcconfig → loads xterm-term.html → xterm-vendor/xterm-classic.js + xterm-term-bridge.js
+- Default ARM64 (xterm.js): includes XtermRenderer.xcconfig, loads xterm-term.html → xterm-vendor/xterm-classic.js + addon-canvas.js + xterm-term-bridge.js
+- Ghostty Web alternative: TERMINAL_RENDERER_DEFINES=USE_XTERM_RENDERER=0 loads term.html → ghostty-web.js + term.js
 - Both renderers use the same native bridge API (window.exports / webkit.messageHandlers)
 
 Runtime notes:

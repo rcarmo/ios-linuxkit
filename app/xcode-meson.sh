@@ -1,5 +1,20 @@
 #!/bin/bash
 
+jit=false
+if [[ $# -ne 0 ]]; then
+    if [[ $# -ne 1 || $1 != --aot-bootstrap || ${TARGET_NAME:-} != iSH-ARM64-AOT-Bootstrap || ${ARCHS:-} != arm64 || ${MESON_BUILD_DIR:-} != */meson-aot-bootstrap ]]; then
+        echo 'AOT bootstrap requires its isolated ARM64 target and Meson directory' >&2
+        exit 2
+    fi
+    for define in GUEST_ARM64=1 ISH_JIT=1 ISH_JIT_NO_EMIT=1 ISH_AOT_BOOTSTRAP=1; do
+        case " ${GCC_PREPROCESSOR_DEFINITIONS:-} " in
+            *" $define "*) ;;
+            *) echo "AOT bootstrap is missing shared definition: $define" >&2; exit 2 ;;
+        esac
+    done
+    jit=true
+fi
+
 # Try to figure out the user's PATH to pick up their installed utilities.
 # Do not use sudo here: personal Apple developer machines are not always
 # configured with sudo for the GUI user, and the build only needs PATH hints.
@@ -57,7 +72,7 @@ EOF
         guest_arch_opt="-Dguest_arch=$GUEST_ARCH"
     fi
     (set -x; meson "$SRCROOT" --cross-file "$crossfile" $guest_arch_opt \
-        -Djit=false -Djit_emit=false -Dcli_aot=) || exit $?
+        -Djit=$jit -Djit_emit=false -Dcli_aot=) || exit $?
     config=$(meson introspect --buildoptions)
 fi
 
@@ -78,12 +93,10 @@ if [[ -n "$ISH_KERNEL" ]]; then
 fi
 kconfig=""
 guest_arch=${GUEST_ARCH:-arm64}
-# Existing app targets have neither native fault recovery nor AOT image linkage.
-# Never inherit a recorder/native configuration from a reused build directory.
-# An eventual AOT target needs a separate, validated bridge, not an env override.
-# Change all three together: jit=false with stale cli_aot still set would fail
-# Meson's dependency check before a later option update could clear the images.
-(set -x; meson configure -Djit=false -Djit_emit=false -Dcli_aot=) || exit $?
+# Reset backend, emission and CLI images together, including in reused builds.
+# Only the isolated bootstrap target may compile the native backend; it still
+# runs gadgets and does not install the app fault adapter or link images.
+(set -x; meson configure -Djit=$jit -Djit_emit=false -Dcli_aot=) || exit $?
 for var in buildtype log b_ndebug b_sanitize log_handler kernel kconfig guest_arch; do
     old_value=$(python3 -c "import sys, json; v = next(x['value'] for x in json.load(sys.stdin) if x['name'] == '$var'); print(str(v).lower() if isinstance(v, bool) else ','.join(v) if isinstance(v, list) else v)" <<< $config)
     new_value=${!var}

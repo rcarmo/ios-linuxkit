@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two shared ARM64 application schemes. Both package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.4.1 with Apple build number 818; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two reference ARM64 application schemes and an isolated AOT bootstrap scheme. They package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.4.1 with Apple build number 818; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 
@@ -26,6 +26,7 @@ Change the upstream default `ROOT_BUNDLE_IDENTIFIER` in `app/iSH.xcconfig` to an
 |---|---|---|
 | `iSH-ARM64` | `LinuxKit.app` | Main reference application. |
 | `iSH-ARM64-ffmpeg` | `iSH ARM64 ffmpeg.app` | Test target that defines `ISH_FFMPEG_TEST=1` and registers the built-in fake FFmpeg handler. |
+| `iSH-ARM64-AOT-Bootstrap` | `LinuxKit AOT Bootstrap.app` | Native/no-emitter compilation and symbol inspection; executes gadgets only. |
 
 The main product name comes from `app/App.xcconfig`; the scheme still contains
 the historical `iSH ARM64.app` display label. Packaging must use the evaluated
@@ -43,6 +44,10 @@ xcodebuild \
 ```
 
 The exact signing arguments depend on the developer account. A simulator build can use a simulator destination; device and archive builds require valid signing settings. These Xcode commands have not been run on the Debian validation host.
+
+Xcode 27 requires an iOS deployment target of at least 15.0. Pass
+`IPHONEOS_DEPLOYMENT_TARGET=15.0` when building with that toolchain; the inherited
+project default remains 11.0 for older Xcode installations.
 
 There is no supported `make ipa`/`ldid` fakesigning workflow in this repository.
 Fakesigning alone does not provide the provisioning or app-group entitlements
@@ -69,8 +74,12 @@ combinations do not receive these flags. `make test-darwin-feature-macros` check
 that scope using Meson and a local compiler; it is not an Apple SDK build.
 
 The bridge resets all three native/image settings together in fresh and reused
-build directories; configuration failure propagates. An environment override
-cannot turn an existing scheme into an AOT target. Ninja then builds and links:
+build directories. `app/xcode-build-arm64.sh` stops the Xcode phase on Meson or
+Ninja failure and checks each archive before publishing its linker symlink.
+An environment override cannot turn a reference scheme into an AOT target.
+Only the guarded bootstrap target uses `jit=true`, still with `jit_emit=false`
+and empty CLI images, in its separate `meson-aot-bootstrap` directory. Ninja
+then builds and links:
 
 - `libish.a` — userspace kernel and filesystems;
 - `libish_emu.a` — ARM64 decoder, gadgets and TLB;
@@ -86,7 +95,9 @@ The build downloads from the network. Pin and review a new rootfs URL in `app/Gu
 
 ## Terminal frontend
 
-`app/Terminal.m` hosts the terminal in `WKWebView`. The default ARM64 configuration loads `app/terminal/term.html`, which uses the vendored Ghostty Web JavaScript/Wasm frontend. `app/XtermRenderer.xcconfig` defines `USE_XTERM_RENDERER=1` for targets that need the alternative vendored xterm.js page.
+`app/Terminal.m` hosts the terminal in `WKWebView`. All ARM64 schemes default to vendored xterm.js 6.0.0 with the Canvas renderer and ligatures, loading `app/terminal/xterm-term.html`. `app/AppARM64.xcconfig` includes `app/XtermRenderer.xcconfig`, which defines `USE_XTERM_RENDERER=1` while preserving the guest preprocessor definitions.
+
+Ghostty Web 0.9.3 is also bundled and available as an alternative JavaScript/Wasm frontend. To select it, pass `TERMINAL_RENDERER_DEFINES=USE_XTERM_RENDERER=0` to `xcodebuild`; this loads `app/terminal/term.html`. Both renderers use the same native bridge.
 
 Terminal preferences pass the palette, font family, font size, cursor colour, blink setting and cursor shape into the web frontend. The bundle includes JetBrains Mono and Fira Code Nerd Font Mono files. The native bridge registers `load`, `log`, `sendInput`, `resize` and `propUpdate` message handlers; changes to its JavaScript messages must be checked against the corresponding Objective-C handler.
 
@@ -152,15 +163,16 @@ source-review results for earlier app changes.
 
 ## AOT app integration
 
-The native/AOT backend is available through Meson and tested with linked Linux
-ELF images. Existing Xcode schemes do not configure it or link images. The
-[Apple AOT procedure](NATIVE_AOT_IOS.md) specifies the isolated build settings,
-shared ABI checks, actual app fault-adapter installation, Mach-O conversion, static linkage,
-signing and device tests needed to add it.
+The native/AOT backend is tested with linked Linux ELF images. The isolated
+`iSH-ARM64-AOT-Bootstrap` scheme now compiles that backend with runtime emission
+disabled and matching app/library definitions. It uses a separate bundle ID,
+app group and Meson directory. Startup forces `ISH_JIT=0`; no images are linked
+and the app fault adapter is not installed. Reference schemes remain gadgets.
 
-The [2.4.1 source release](reports/releases/IOS_LINUXKIT_2.4.1.md) includes
-shared CLI/app recovery preparation and read-only target layout diagnostics.
-The callable app adapter is not installed; no isolated AOT scheme or app image
-membership exists. Keep the gadget-only app configuration and Alpine 3.24.2 pin.
-Existing installed userlands are unchanged. Apple archive, signing and physical-device
-evidence must be collected separately.
+`sh scripts/build-ios-aot-bootstrap.sh DERIVED_DATA CODE_SIGNING_ALLOWED=NO`
+builds an unsigned device binary and inspects its actual SDK/platform, native
+compiler definitions, required symbols and absence of known emitter primitives.
+Signing and device validation remain separate gates. The bootstrap
+can expose `/proc/ish/jit-layout`, but `ready=0` cannot supply image conventions.
+The [Apple AOT procedure](NATIVE_AOT_IOS.md) covers observed contracts, fault
+adapter integration, static image linkage and device gates still required.

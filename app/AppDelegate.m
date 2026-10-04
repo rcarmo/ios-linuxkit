@@ -80,6 +80,14 @@ static int bootError;
 
 - (int)boot {
 #if !ISH_LINUX
+#ifdef ISH_AOT_BOOTSTRAP
+#if !defined(ISH_JIT) || !defined(ISH_JIT_NO_EMIT)
+#error AOT bootstrap requires matching native/no-emitter definitions
+#endif
+    // The bootstrap has no installed native fault adapter or validated images.
+    if (setenv("ISH_JIT", "0", 1) != 0)
+        return _ENOMEM;
+#endif
     NSURL *root = [Roots.instance rootUrl:Roots.instance.defaultRoot];
 
     int err = mount_root(&fakefs, [root URLByAppendingPathComponent:@"data"].fileSystemRepresentation);

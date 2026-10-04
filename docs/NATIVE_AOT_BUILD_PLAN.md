@@ -6,7 +6,9 @@ builds use the gadget interpreter; enable AOT explicitly with the commands below
 
 Use the [artifact guide](NATIVE_AOT_ARTIFACT_KIT.md) to freeze, restore and share
 inputs, or the [iOS guide](NATIVE_AOT_IOS.md) to prepare Apple builds. Existing
-Xcode schemes use gadgets. Apple AOT integration and device tests are incomplete.
+Reference Xcode schemes use gadgets. The isolated Apple bootstrap compiles the
+native/no-emitter backend but forces execution off. Apple image integration and
+device tests are incomplete.
 
 ## Choose a build
 
