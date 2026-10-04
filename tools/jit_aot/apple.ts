@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 /** Apple AOT preparation checks. These do not establish device execution. */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { checked, definedSymbols, requireAppleBinary, sha } from './kit';
+import { validateAppleModules } from './apple-modules';
 
 export function appleBuildVersion(bytes: Uint8Array) {
   requireAppleBinary(bytes, 'ios');
@@ -78,8 +79,13 @@ async function inspect(buildDirectory: string, binary: string, executionEnabled 
   const loadCommands = checked(['xcrun', 'otool', '-l', binary]);
   const haveImages = /sectname\s+__ish_aot\b/.test(loadCommands);
   if (haveImages !== executionEnabled) throw Error('linked images do not match the requested execution mode');
-  if (executionEnabled) for (const name of ['musl', 'busybox', 'bun'])
-    if (!symbols.has(`ish_aot_module_${name}`)) throw Error(`missing static image: ${name}`);
+  if (executionEnabled) {
+    const identity = JSON.parse(readFileSync(join(dirname(binary), 'aot-build.json'), 'utf8'));
+    if (identity.executionEnabled !== true || identity.platform !== build.platform)
+      throw Error('invalid linked image identity');
+    for (const { name } of validateAppleModules(identity.modules))
+      if (!symbols.has(`ish_aot_module_${name}`)) throw Error(`missing static image: ${name}`);
+  }
   console.log(JSON.stringify({ kind: executionEnabled ? 'apple-aot-linked' : 'apple-aot-bootstrap', binary: resolve(binary), binarySha256: await sha(binary),
     ...build, runtimeEmissionCompiled: false, imageExecutionEnabled: executionEnabled,
     validation: 'compiled binary and backend object only; signing, observed ready ABI and device gates remain' }, null, 2));

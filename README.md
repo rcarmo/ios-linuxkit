@@ -113,6 +113,11 @@ cleanup errors when installing fd and ripgrep. xterm remains the default
 terminal, with Ghostty available as an alternative. The accelerated iPhone
 test build includes Bun 1.4.2; a reported iPhone crash remains under investigation.
 
+The current AOT build also bundles Go from Alpine's pinned ARM64 APK and records
+the Go command, formatter, compiler, assembler, linker and vet tool. See the
+[accelerated iOS build guide](docs/NATIVE_AOT_IOS.md) for packaging, build checks
+and CGo requirements.
+
 Earlier source releases and dated audits are indexed under
 [reports](docs/reports/README.md). Their measurements apply to the revisions,
 hosts and guests named in each report.

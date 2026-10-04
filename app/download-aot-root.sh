@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-[ "${TARGET_NAME:-}" = iSH-ARM64-AOT-Bootstrap ] || { echo 'Bun rootfs is for the isolated AOT bootstrap only' >&2; exit 2; }
+[ "${TARGET_NAME:-}" = iSH-ARM64-AOT-Bootstrap ] || { echo 'AOT rootfs is for the isolated AOT bootstrap only' >&2; exit 2; }
 output="$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/root.tar.gz"
 mkdir -p "$(dirname "$output")"
 stage=$(mktemp -d "$(dirname "$output")/.linuxkit-aot-root.XXXXXX")
@@ -20,6 +20,14 @@ for name in libgcc libstdc++; do
     curl --fail --location --retry 2 --output "$stage/$name.apk" \
         "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/$name-15.2.0-r5.apk"
 done
+if [ -n "${GO_APK_PATH:-}" ]; then
+    go_archive=$GO_APK_PATH
+else
+    go_archive="$stage/go.apk"
+    curl --fail --location --retry 2 --output "$go_archive" \
+        https://dl-cdn.alpinelinux.org/alpine/v3.24/community/aarch64/go-1.26.8-r0.apk
+fi
 python3 "$SRCROOT/scripts/package-bun-rootfs.py" \
-    "$stage/base/root.tar.gz" "$bun_archive" "$output" "$ROOTFS_SHA256" \
+    "$stage/base/root.tar.gz" "$bun_archive" "$stage/bun-root.tar.gz" "$ROOTFS_SHA256" \
     "$stage/libgcc.apk" "$stage/libstdc++.apk"
+python3 "$SRCROOT/scripts/package-go-rootfs.py" "$stage/bun-root.tar.gz" "$go_archive" "$output"

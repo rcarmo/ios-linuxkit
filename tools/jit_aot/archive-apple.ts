@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { checked, safePath, sha, verify } from './kit';
+import { validateAppleModules } from './apple-modules';
 
 const env = process.env;
 if (env.TARGET_NAME !== 'iSH-ARM64-AOT-Bootstrap' || env.ARCHS !== 'arm64')
@@ -26,9 +27,7 @@ if (enabled === '1') {
     if (manifest.kind !== 'apple-bun-images' || manifest.format !== 'macho' || manifest.contract?.platform !== platform)
         throw Error('wrong image kind/SDK contract');
     modules = manifest.modules;
-    if (!Array.isArray(modules) || modules.map(m => m.name).join(',') !== 'musl,busybox,bun' ||
-            modules.some(m => !Number.isInteger(m.translations) || m.translations <= 0))
-        throw Error('requires complete nonempty musl/BusyBox/Bun images');
+    validateAppleModules(modules);
     contract = manifest.contract;
     manifestHash = await sha(join(dir, 'manifest.json'));
     for (const module of modules) sources.push(safePath(dir, `aot_${module.name}.S`));

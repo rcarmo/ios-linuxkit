@@ -5,8 +5,9 @@ app. The app does not generate executable code while running. Code without a
 matching translation uses the normal interpreter.
 
 The `iSH-ARM64-AOT-Bootstrap` scheme builds a separate test app containing
-Alpine 3.24.2 and Bun 1.4.2. xterm is the default terminal; Ghostty remains
-available. The reference ARM64 schemes keep the normal interpreter.
+Alpine 3.24.2, Bun 1.4.2 and Alpine Go 1.26.8-r0. xterm is the default
+terminal; Ghostty remains available. The reference ARM64 schemes keep the
+normal interpreter.
 
 ## Requirements
 
@@ -14,17 +15,17 @@ Use an Apple Silicon Mac with Xcode, command-line tools, Bun, Python3, Meson
 and Ninja. A signed app requires your development team, bundle identifier and
 a connected, unlocked iPhone or iPad.
 
-Check out the release and its dependencies:
+Check out the current source and its dependencies:
 
 ```sh
 git clone --recurse-submodules https://github.com/rcarmo/ios-linuxkit.git
 cd ios-linuxkit
-git checkout v2.5.1
+git checkout master
 git submodule update --init --recursive
 ```
 
 For the recording step, prepare a Darwin ARM64 recorder and a fakefs containing
-the exact musl, BusyBox and Bun files bundled with the app. See
+the exact musl, BusyBox, Bun and Go files bundled with the app. See
 [Linux development](LINUX_DEVELOPMENT.md) for fakefs basics and
 [AOT build instructions](NATIVE_AOT_BUILD_PLAN.md) for recording tools.
 Linux recorder executables cannot run directly on macOS.
@@ -78,7 +79,9 @@ sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/final-build \
 ```
 
 The build script checks that runtime code generation is disabled and that all
-three translation sets are linked. Sign the app normally; no JIT entitlement
+nine translation sets are linked: musl, BusyBox, Bun, Go, gofmt and Go's
+compiler, assembler, linker and vet tool. Older Bun-only image bundles remain
+supported. Sign the app normally; no JIT entitlement
 or downloaded executable code is required.
 
 Startup checks the translations against the running app and refuses an
@@ -88,14 +91,39 @@ set when troubleshooting.
 ## Filesystem and packages
 
 Updating the app preserves existing Linux files and installed packages.
-The bundled filesystem includes Bun but not Pi. Install Pi separately in the
-guest, or import a prepared filesystem. Existing filesystems without Bun are
-not changed automatically.
+The bundled filesystem includes Bun and the Go toolchain but not Pi. Install Pi
+separately in the guest, or import a prepared filesystem. Existing filesystems
+without Bun or Go are not changed automatically.
 
 Package upgrades may replace files used by the translations. Unmatched code
 uses the interpreter. Do not overwrite user files to force a match.
 `BUN_ARCHIVE_PATH` can supply a previously downloaded Bun archive; its checksum
 is still verified. Run `make test-bun-rootfs` to check packaging.
+
+Go comes from the checksum-pinned Alpine 3.24 ARM64 `go-1.26.8-r0.apk`,
+not a separate upstream Go distribution. `GO_APK_PATH` supplies a local copy;
+its checksum, package identity, architecture and executable files are checked.
+The complete Go package payload, including standard-library sources, is bundled
+under `/usr/lib/go`. This does not register Go or its C-toolchain dependencies
+in the installed APK database. Pure-Go builds use `CGO_ENABLED=0` and
+`GOTOOLCHAIN=local`. Install Alpine's `gcc`, `binutils` and `musl-dev` to use CGo.
+Run `make test-go-rootfs` to check Go packaging.
+
+## Check Go compilation
+
+The recording workload formats source, compiles a package, assembles ARM64
+code, builds and runs a program, runs vet and verifies that invalid source is
+rejected. It uses no network access and limits concurrent build jobs.
+To repeat it in a writable Mac test filesystem:
+
+```sh
+ISH_BIN=/absolute/path/to/no-emitter-linked-cli \
+ROOTFS=/absolute/path/to/bun-go-fakefs ISH_JIT=1 GO_AOT_NO_EMIT=1 \
+  bun test tests/host/go-aot.test.ts
+```
+
+Translations cover the compiler tools, not arbitrary programs you compile.
+New Go programs and tools without matching translations use the interpreter.
 
 ## Check on the device
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-// Train the bundled Apple/Bun userland; do not change the Linux Python kit.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+// Train the bundled Apple Bun/Go userland; do not change the Linux Python kit.
+import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { appleBuildVersion } from './apple';
 import { checked, definedSymbols, matchContract, seal, sha } from './kit';
+import { appleModules } from './apple-modules';
 
 const [recorderArg, rootArg, binaryArg, contractArg, outArg] = process.argv.slice(2);
 if (!outArg || process.platform !== 'darwin' || process.arch !== 'arm64')
@@ -18,11 +19,7 @@ if (build.platform !== contract.platform) throw Error('contract platform mismatc
 matchContract(contract, contract, binaryHash);
 const symbols = definedSymbols(checked(['nm', '-g', binary]));
 mkdirSync(stage);
-const modules = [
-    { name: 'musl', path: '/lib/ld-musl-aarch64.so.1' },
-    { name: 'busybox', path: '/bin/busybox' },
-    { name: 'bun', path: '/usr/local/bin/bun' },
-];
+const modules = appleModules;
 const workload = `set -eu
 i=0; while [ "$i" -lt 1000 ]; do i=$((i+1)); done
 test "$i" = 1000
@@ -32,20 +29,29 @@ test "$(/usr/local/bin/bun --version)" = 1.4.2
 printf 'APPLE_AOT_TRAIN_OK\\n'
 `;
 await Bun.write(join(stage, 'workload.sh'), workload);
+cpSync(join(import.meta.dir, '../../tests/arm64/benchmarks/go-aot'), join(stage, 'go-workload'), { recursive: true });
 await Bun.write(join(stage, 'target-contract.json'), JSON.stringify(contract, null, 2));
-const results = [];
-for (const module of modules) {
+// Record the cold Go build with the compiler first, then reuse only its cache.
+// Formatting, direct compile/asm, linking and vet still run on every invocation.
+const order = [...modules.slice(0, 3), modules.find(module => module.name === 'go_compile')!,
+    ...modules.slice(3).filter(module => module.name !== 'go_compile')];
+const goCache = `/tmp/go-aot-record-cache-${process.pid}`;
+const results: any[] = [];
+for (const module of order) {
     const guest = join(root, 'data', module.path), hash = await sha(guest);
     const record = join(stage, module.name + '.jsonl');
+    const go = module.name === 'go' || module.name === 'gofmt' || module.name.startsWith('go_');
     console.log(`Recording ${module.name}`);
     const stdout = checked([recorder, '-f', root, '/usr/bin/env',
         'BUN_JSC_useJIT=0', 'BUN_RUNTIME_TRANSPILER_CACHE_PATH=0',
-        '/bin/sh', '-ec', workload], join(stage, module.name + '-record.log'), {
+        ...(go ? [`GO_AOT_CACHE=${goCache}`] : []),
+        '/bin/sh', ...(go ? ['/mnt/go-aot/build.sh'] : ['-ec', workload])], join(stage, module.name + '-record.log'), {
         env: { ISH_JIT: '1', ISH_JIT_PIC: '1', ISH_JIT_STATS: '1',
-            ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: module.path, ISH_AOT_FAMILY: '0' },
-        timeout: 240000,
+            ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: module.path, ISH_AOT_FAMILY: '0',
+            ...(go ? { ISH_BIND_MOUNTS: `/mnt/go-aot=${join(stage, 'go-workload')}:ro` } : {}) },
+        timeout: go ? 1200000 : 240000,
     });
-    if (!stdout.split('\n').includes('APPLE_AOT_TRAIN_OK')) throw Error('missing workload completion');
+    if (!stdout.split('\n').includes(go ? 'GO_AOT_BUILD_OK' : 'APPLE_AOT_TRAIN_OK')) throw Error('missing workload completion');
     const rows = readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     const header = rows.shift()?.header;
     matchContract(header, contract, binaryHash);
@@ -65,6 +71,8 @@ for (const module of modules) {
     if (await sha(guest) !== hash) throw Error('guest changed while recording');
     results.push({ ...module, sha256: hash, translations: rows.length, header });
 }
+checked([recorder, '-f', root, '/bin/rm', '-rf', goCache], join(stage, 'go-cache-cleanup.log'), { env: { ISH_JIT: '0' } });
+results.sort((a, b) => modules.findIndex(module => module.name === a.name) - modules.findIndex(module => module.name === b.name));
 await seal(stage, out, { kind: 'apple-bun-images', format: 'macho', contract, modules: results,
     recorderSha256: await sha(recorder), sourceRevision: checked(['git', 'rev-parse', 'HEAD']).trim(),
     validation: 'recorded/generation only; linked execution and device gates required' });
