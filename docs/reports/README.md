@@ -7,7 +7,7 @@ Files in this directory preserve dated evidence. They are not maintained procedu
 - [`benchmarks/historical/`](benchmarks/historical/) preserves retired compatibility and performance comparisons.
 - [`benchmarks/ARM_LINUX_POKE_2026-09-05.md`](benchmarks/ARM_LINUX_POKE_2026-09-05.md) records CPU poke profiling and paired Linux measurements.
 - [`benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md`](benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) records the second optimisation pass: inline load fault-PC saving, rejected TLB candidate, paired timings and exact-PC regression evidence.
-- [`releases/`](releases/) preserves source-release validation, production and staging snapshots; the latest source release is [2.4.1](releases/IOS_LINUXKIT_2.4.1.md).
+- [`releases/`](releases/) preserves source-release validation, production and staging snapshots; the latest source release is [2.5.0](releases/IOS_LINUXKIT_2.5.0.md).
 - [`workloads/`](workloads/) preserves workload investigations.
 
 Integration evidence, subsequently included default-off in 2.3.0: [Alpine 3.24.2 native/AOT host proof](audits/AOT_ALPINE_HOST_2026-09-29.md) — default-off selective backend, four linked ELF images, Linux release/debug gates and modest/mixed measured results. iOS/device gates remain. [Prerequisite repairs](audits/AOT_ALPINE_INTEGRATION_2026-09-29.md) include the diagnosed proc-stat deadlock.
@@ -22,7 +22,7 @@ selective CLI recovery hardening. The backend is disabled by default.
 
 [GitHub issue/PR triage](audits/GITHUB_TRIAGE_2026-10-04.md) records the scoped Darwin feature-macro fix, local regression checks and unsupported IPA/custom-output submission boundaries. Apple SDK/device compilation and installation remain unverified.
 
-[2.4.1 patch source release](releases/IOS_LINUXKIT_2.4.1.md) includes the validated default-off offload and shared-recovery tranches, VFS allocation repair and maintained-guide refresh. No production cooperative handler or app AOT is enabled.
+[2.5.0 minor source release](releases/IOS_LINUXKIT_2.5.0.md) adds the isolated Apple static-AOT/Bun integration, xterm default and touch-selection/scrolling repairs, and emulator fixes for Bun/pi crashes and TLS. Reference schemes remain gadget-only; physical-device acceptance is separate from tagging.
 
 [Shared native recovery preparation](audits/SHARED_NATIVE_RECOVERY_2026-10-02.md) records the separate CLI/uninstalled-app adapters and read-only layout diagnostics, Linux exact-fault tests and unchanged frozen-image ABI. Actual Apple integration remains blocked on SDK/device gates.
 

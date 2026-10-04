@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two reference ARM64 application schemes and an isolated AOT bootstrap scheme. They package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.4.1 with Apple build number 818; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two reference ARM64 application schemes and an isolated AOT bootstrap scheme. They package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.5.0 with Apple build number 823; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 # Versioning and releases
 
-The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.4.1**, Apple build **818**, with annotated tag `v2.4.1` created only after validation. See the [2.4.1 source release record](reports/releases/IOS_LINUXKIT_2.4.1.md).
+The ARM64 application uses semantic release versions, monotonically increasing Apple build numbers and matching annotated Git tags. The current source version is **2.5.0**, Apple build **823**. See the [2.5.0 source release record](reports/releases/IOS_LINUXKIT_2.5.0.md) for the scope of annotated tag `v2.5.0` and outstanding device gates. Build 822 is reserved for observing the matching no-emitter target contract; build 823 is the image-enabled iPhone build.
 
 ## Version sources
 
@@ -77,17 +77,17 @@ Commit the version, documentation and release evidence together. Push the commit
 
 ```sh
 git push origin master
-git tag -a v2.4.1 -m 'ios-linuxkit 2.4.1'
-git push origin v2.4.1
+git tag -a v2.5.0 -m 'ios-linuxkit 2.5.0'
+git push origin v2.5.0
 ```
 
-Replace `2.4.1` with the version in `app/AppARM64.xcconfig`. Verify all three references:
+Replace `2.5.0` with the version in `app/AppARM64.xcconfig`. Verify all three references:
 
 ```sh
 git rev-parse HEAD
 git rev-parse origin/master
-git rev-list -n 1 v2.4.1
-git ls-remote origin refs/heads/master refs/tags/v2.4.1 'refs/tags/v2.4.1^{}'
+git rev-list -n 1 v2.5.0
+git ls-remote origin refs/heads/master refs/tags/v2.5.0 'refs/tags/v2.5.0^{}'
 ```
 
 Publish the GitHub release against that verified tag. State source-only scope,

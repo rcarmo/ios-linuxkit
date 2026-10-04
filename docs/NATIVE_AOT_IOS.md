@@ -14,9 +14,11 @@ device execution and pi stability remain separate acceptance gates. See the
 
 Use this procedure on an Apple Silicon Mac after reproducing the
 [Linux AOT build](NATIVE_AOT_BUILD_PLAN.md). Keep the existing gadget-only schemes
-available throughout the work. Source release 2.4.1 includes the handoff tools,
-shared recovery and read-only layout diagnostics. Reference app execution stays
-on gadgets; the subsequent bootstrap preparation is described below.
+available throughout the work. Source release 2.5.0 includes the handoff tools,
+Apple static-image integration, native fault adapter and Bun/pi emulator fixes.
+Reference app execution stays on gadgets. Code version 12 requires newly
+recorded images bound to the observed target contract; version-11 images
+cannot validate this release.
 
 ## Inputs and tools
 
@@ -35,7 +37,7 @@ The first bootstrap build and device-install results are recorded in the
 brew install meson ninja python
 git clone --recurse-submodules https://github.com/rcarmo/ios-linuxkit.git
 cd ios-linuxkit
-git checkout v2.4.1
+git checkout v2.5.0
 git submodule update --init --recursive
 ```
 
