@@ -1,5 +1,5 @@
 // Run with guest Bun after installing pi in /opt/pi. No real project files.
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const started = performance.now();
@@ -95,7 +95,5 @@ Do not access any other files. Stop after the test passes.`);
         importMs, workloadMs: performance.now() - workloadStarted,
         totalMs: performance.now() - started, requests, timings, toolErrors, testPassed }));
 } finally {
-    // Use BusyBox cleanup: Bun rm currently receives EPERM for guest directories.
-    const cleanup = Bun.spawnSync(['/bin/rm', '-rf', cwd]);
-    if (cleanup.exitCode !== 0) console.error('benchmark fixture cleanup failed');
+    await rm(cwd, { recursive: true, force: true });
 }

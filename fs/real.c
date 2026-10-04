@@ -471,8 +471,19 @@ int realfs_link(struct mount *mount, const char *src, const char *dst) {
 
 int realfs_unlink(struct mount *mount, const char *path) {
     int res = unlinkat(mount->root_fd, fix_path(path), 0);
-    if (res < 0)
+    if (res < 0) {
+#ifdef __APPLE__
+        // Darwin uses EPERM for directory unlink; Linux callers expect EISDIR.
+        int saved_errno = errno;
+        struct stat statbuf;
+        if (saved_errno == EPERM &&
+                fstatat(mount->root_fd, fix_path(path), &statbuf, AT_SYMLINK_NOFOLLOW) == 0 &&
+                S_ISDIR(statbuf.st_mode))
+            return _EISDIR;
+        errno = saved_errno;
+#endif
         return errno_map();
+    }
     return res;
 }
 

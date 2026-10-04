@@ -12,6 +12,8 @@
   the keyboard.
 - Fixed runtime errors that could crash Bun/Pi or cause secure downloads to fail
   with `BAD_DECRYPT` or misleading certificate errors.
+- Fixed `EPERM` errors when Pi removes temporary files after installing
+  fd and ripgrep.
 
 ## Known limitations
 

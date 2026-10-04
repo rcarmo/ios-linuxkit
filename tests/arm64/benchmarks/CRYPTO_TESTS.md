@@ -1,4 +1,4 @@
-# Bun crypto and TLS regression checks
+# Bun crypto, TLS and filesystem checks
 
 These tests target guest Bun 1.4.2. Offline oracles use independent native
 Node crypto; Node 26 is verified. The ML-KEM oracle requires native
@@ -13,7 +13,8 @@ export BUILD_DIR=/path/to/darwin-arm64-build
 export ISH_BIN="$BUILD_DIR/ish"
 export ROOTFS=/path/to/bun-fakefs
 bun test tests/host/arm64-gadget-differential.test.ts \
-  tests/host/bun-crypto-oracles.test.ts tests/host/dczva-retry.test.ts
+  tests/host/bun-crypto-oracles.test.ts tests/host/dczva-retry.test.ts \
+  tests/host/bun-remove.test.ts
 ```
 
 The instruction tests use the actual decoder/gadgets and native Apple Silicon
@@ -54,3 +55,12 @@ For linked AOT validation, repeat the guest checks with the no-emitter linked
 CLI and `ISH_JIT=1`, and inspect its AOT/emit counters. Decoder changes require
 fresh target-bound recordings; version-11 images cannot validate version 12.
 Mac checks do not replace physical iPhone workload and memory-policy checks.
+
+## Pi tool installation
+
+Run the public-download command above with `pi-tool-downloads.mjs` instead of
+`bun-tls-downloads.mjs --downloads` to check Pi's complete fd/ripgrep installation.
+The fixture must contain Pi but no system fd/ripgrep. It downloads both tools
+concurrently, runs `--version` on each, checks that no extraction files remain
+and removes its isolated temporary directory. It does not read or change your
+Pi configuration or credentials.
