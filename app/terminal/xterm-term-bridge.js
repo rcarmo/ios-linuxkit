@@ -95,6 +95,7 @@
     let nativeScrollRequest = null;
     let oldProps = {};
     let xtermAppActive = null;
+    let selectionAnchor = null;
 
     // ── Terminal setup ────────────────────────────────────────────────────────
     const term = new Terminal({
@@ -135,6 +136,7 @@
     });
     term.onScroll(scheduleScrollSync);
     term.onCursorMove(syncApplicationCursor);
+    term.onSelectionChange(() => native.selectionChanged(term.getSelection()));
 
     term.open(terminalElement);
     installNativeFocusAdapter();
@@ -182,6 +184,22 @@
         copy() {
             return term.getSelection();
         },
+        beginSelection(x, y) {
+            selectionAnchor = selectionCell(x, y);
+            if (selectionAnchor)
+                term.select(selectionAnchor.col, selectionAnchor.row, 1);
+        },
+        extendSelection(x, y) {
+            const end = selectionCell(x, y);
+            if (!selectionAnchor || !end)
+                return;
+            const a = selectionAnchor.row * term.cols + selectionAnchor.col;
+            const b = end.row * term.cols + end.col;
+            const start = Math.min(a, b);
+            term.select(start % term.cols, Math.floor(start / term.cols), Math.abs(a - b) + 1);
+        },
+        selectAll() { term.selectAll(); },
+        clearSelection() { selectionAnchor = null; term.clearSelection(); },
         setFocused(focused) {
             terminalElement.classList.toggle('terminal-focused', !!focused);
             setXtermAppActive(!!focused);
@@ -251,6 +269,18 @@
         term.textarea.spellcheck = false;
     }
 
+    function selectionCell(x, y) {
+        const screen = terminalElement.querySelector('.xterm-screen');
+        const cell = getCellSize();
+        if (!screen || !cell.width || !cell.height || !Number.isFinite(x) || !Number.isFinite(y))
+            return null;
+        const rect = screen.getBoundingClientRect();
+        return {
+            col: Math.max(0, Math.min(term.cols - 1, Math.floor((x - rect.left) / cell.width))),
+            row: term.buffer.active.viewportY + Math.max(0, Math.min(term.rows - 1, Math.floor((y - rect.top) / cell.height))),
+        };
+    }
+
     function installFocusBridge() {
         terminalElement.addEventListener('touchstart', (event) => {
             if (!term.hasSelection())
@@ -258,7 +288,7 @@
         }, {capture: true});
         terminalElement.addEventListener('touchend', (event) => {
             if (term.hasSelection())
-                return;
+                term.clearSelection();
             event.preventDefault();
             event.stopImmediatePropagation();
             native.focus();

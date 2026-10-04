@@ -33,12 +33,13 @@ struct rowcol {
 }
 @end
 
-@interface TerminalView ()
+@interface TerminalView () <UIEditMenuInteractionDelegate>
 
 @property (nonatomic) NSMutableArray<UIKeyCommand *> *keyCommands;
 @property ScrollbarView *scrollbarView;
 @property (nonatomic) BOOL terminalFocused;
 @property (nonatomic) BOOL updatingTerminalScroll;
+@property UIEditMenuInteraction *terminalEditMenu API_AVAILABLE(ios(16.0));
 
 @property (nullable) NSString *markedText;
 @property (nullable) NSString *selectedText;
@@ -68,6 +69,14 @@ struct rowcol {
     scrollbarView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     self.clipsToBounds = YES;
     [self addSubview:scrollbarView];
+#if USE_XTERM_RENDERER
+    UILongPressGestureRecognizer *selectionGesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(selectTerminalText:)];
+    [self addGestureRecognizer:selectionGesture];
+    if (@available(iOS 16.0, *)) {
+        self.terminalEditMenu = [[UIEditMenuInteraction alloc] initWithDelegate:self];
+        [self addInteraction:self.terminalEditMenu];
+    }
+#endif
 
     UserPreferences *prefs = UserPreferences.shared;
     [prefs observe:@[@"capsLockMapping", @"optionMapping", @"backtickMapEscape", @"overrideControlSpace"]
@@ -111,7 +120,7 @@ struct rowcol {
     }
 }
 
-static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight", @"newScrollTop", @"openLink"};
+static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight", @"newScrollTop", @"openLink", @"selectionChanged"};
 
 - (void)setTerminal:(Terminal *)terminal {
     if (_terminal) {
@@ -120,6 +129,7 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
     }
 
     _terminal = terminal;
+    self.selectedText = nil;
     if (_terminal == nil)
         return;
     [self _updateStyle];
@@ -320,6 +330,9 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
     } else if ([message.name isEqualToString:@"openLink"]) {
         if ([message.body isKindOfClass:NSString.class])
             [UIApplication openURL:message.body];
+    } else if ([message.name isEqualToString:@"selectionChanged"]) {
+        if ([message.body isKindOfClass:NSString.class])
+            self.selectedText = message.body;
     }
 }
 
@@ -432,7 +445,54 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
 }
 
 - (void)copy:(id)sender {
-    [self.terminal.webView evaluateJavaScript:@"exports.copy()" completionHandler:nil];
+    [self.terminal.webView evaluateJavaScript:@"exports.copy()" completionHandler:^(id result, NSError *error) {
+        if (error == nil && [result isKindOfClass:NSString.class] && [result length] > 0)
+            UIPasteboard.generalPasteboard.string = result;
+    }];
+}
+
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
+#if USE_XTERM_RENDERER
+    if (action == @selector(copy:))
+        return self.selectedText.length > 0;
+    if (action == @selector(selectAll:))
+        return self.terminal.loaded;
+#endif
+    return [super canPerformAction:action withSender:sender];
+}
+
+- (void)selectAll:(id)sender {
+    [self.terminal.webView evaluateJavaScript:@"exports.selectAll?.()" completionHandler:nil];
+}
+
+- (void)selectTerminalText:(UILongPressGestureRecognizer *)gesture {
+    if (!self.terminal.loaded)
+        return;
+    CGPoint point = [gesture locationInView:self.terminal.webView];
+    if (gesture.state == UIGestureRecognizerStateBegan || gesture.state == UIGestureRecognizerStateChanged) {
+        self.scrollbarView.scrollEnabled = NO;
+        NSString *method = gesture.state == UIGestureRecognizerStateBegan ? @"beginSelection" : @"extendSelection";
+        NSString *script = [NSString stringWithFormat:@"exports.%@(%f,%f)", method, point.x, point.y];
+        [self.terminal.webView evaluateJavaScript:script completionHandler:nil];
+    } else if (gesture.state == UIGestureRecognizerStateEnded) {
+        self.scrollbarView.scrollEnabled = YES;
+        [self becomeFirstResponder];
+        CGPoint anchor = [gesture locationInView:self];
+        if (@available(iOS 16.0, *)) {
+            [self.terminalEditMenu presentEditMenuWithConfiguration:[UIEditMenuConfiguration configurationWithIdentifier:nil sourcePoint:anchor]];
+        } else {
+            [UIMenuController.sharedMenuController showMenuFromView:self rect:CGRectMake(anchor.x, anchor.y, 1, 1)];
+        }
+    } else if (gesture.state == UIGestureRecognizerStateCancelled || gesture.state == UIGestureRecognizerStateFailed) {
+        self.scrollbarView.scrollEnabled = YES;
+    }
+}
+
+- (UIMenu *)editMenuInteraction:(UIEditMenuInteraction *)interaction menuForConfiguration:(UIEditMenuConfiguration *)configuration suggestedActions:(NSArray<UIMenuElement *> *)suggestedActions API_AVAILABLE(ios(16.0)) {
+    __weak TerminalView *view = self;
+    UIAction *copy = [UIAction actionWithTitle:@"Copy" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction *action) { [view copy:nil]; }];
+    UIAction *selectAll = [UIAction actionWithTitle:@"Select All" image:nil identifier:nil handler:^(UIAction *action) { [view selectAll:nil]; }];
+    return [UIMenu menuWithChildren:@[copy, selectAll]];
 }
 
 - (void)clearScrollback:(UIKeyCommand *)command {

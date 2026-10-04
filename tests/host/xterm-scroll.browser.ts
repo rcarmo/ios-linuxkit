@@ -71,6 +71,27 @@ try {
         assert.equal(after.firstLine, before.firstLine, 'trimmed output must preserve the line being read');
         assert.equal(after.viewportY, before.viewportY - 100);
 
+        const selected = await page.evaluate(() => {
+            const term = (window as any).testTerminal;
+            const rect = document.querySelector('.xterm-screen')!.getBoundingClientRect();
+            const cell = term._core._renderService.dimensions.css.cell;
+            const bridge = (window as any).exports;
+            bridge.beginSelection(rect.left + cell.width / 2, rect.top + cell.height / 2);
+            bridge.extendSelection(rect.left + cell.width * 5.5, rect.top + cell.height / 2);
+            const forward = bridge.copy();
+            bridge.beginSelection(rect.left + cell.width * 5.5, rect.top + cell.height / 2);
+            bridge.extendSelection(rect.left + cell.width / 2, rect.top + cell.height / 2);
+            const backward = bridge.copy();
+            bridge.extendSelection(rect.left + cell.width * 5.5, rect.top + cell.height * 1.5);
+            const multiline = bridge.copy();
+            bridge.clearSelection();
+            return { forward, backward, multiline, cleared: bridge.copy() };
+        });
+        assert.equal(selected.forward, after.firstLine.slice(0, 6));
+        assert.equal(selected.backward, selected.forward);
+        assert.ok(selected.multiline.includes('\n'));
+        assert.equal(selected.cleared, '');
+
         await page.evaluate(() => (window as any).exports.scrollToBottom());
         await settle();
         await page.setViewportSize({ width: viewport.width, height: 401 });

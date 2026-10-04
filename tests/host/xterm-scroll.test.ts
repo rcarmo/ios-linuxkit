@@ -23,6 +23,7 @@ async function harness() {
         onData() {}
         onResize() {}
         onCursorMove() {}
+        onSelectionChange() {}
         onScroll(fn: () => void) { this.onScrollCallback = fn; }
         open() {}
         refresh() {}
