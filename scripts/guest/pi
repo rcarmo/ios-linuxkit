@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+entry=/opt/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js
+if [ ! -f "$entry" ]; then
+    echo 'pi is not installed in /opt/pi' >&2
+    exit 127
+fi
+exec /usr/local/bin/bun "$entry" "$@"

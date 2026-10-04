@@ -25,7 +25,8 @@ they require comparison with the actual target build.
 On the Mac, install Xcode/command-line tools, Bun, Python3, Meson and Ninja.
 Generation uses Apple `nm` and host `tar`. Record the Mac model/SoC/RAM,
 macOS/Xcode/SDK versions, and target iPhone/iPad model/SoC/RAM/iOS version. These
-Apple hardware and software versions have not yet been selected or tested.
+The first bootstrap build and device-install results are recorded in the
+[Bun/pi test-build report](reports/benchmarks/PI_BUN_DARWIN_2026-10-04.md).
 
 ```sh
 brew install meson ninja python
@@ -69,8 +70,10 @@ sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/new-derived-data \
 
 For a signed bootstrap, replace `CODE_SIGNING_ALLOWED=NO` with the configured
 `DEVELOPMENT_TEAM`, `ROOT_BUNDLE_IDENTIFIER` and `-allowProvisioningUpdates`.
-Its `.aot-bootstrap` bundle/app-group suffix keeps its filesystem separate from
-the reference app. The script uses iOS 15 as the minimum for Xcode 27.
+Its `.aot-bootstrap` bundle suffix and private application-support filesystem
+keep it separate from the reference app. It has no file-provider extension and
+does not require an app-group entitlement. The script uses iOS 15 as the minimum
+for Xcode 27.
 Set `IOS_DESTINATION='id=DEVICE_UDID'` to provision for a connected device.
 
 The bootstrap rootfs adds Bun 1.4.2 for Linux AArch64 musl to a fresh Alpine
@@ -87,6 +90,11 @@ zip to Xcode. `AOT_INCLUDE_BUN=1 make record-arm64-aot` records Bun as an
 optional fifth module after checking its version and running arithmetic/JSON.
 The guest must already contain the baseline Python/zlib package set. This
 does not yet prove Bun native-image execution on Apple devices.
+
+The [Bun/pi test-build report](reports/benchmarks/PI_BUN_DARWIN_2026-10-04.md)
+describes the separately prepared pi filesystem, launcher and repeatable
+offline workload. pi is not part of the default bundled rootfs. The initial
+device installation is for testing; intermittent guest crashes remain unresolved.
 
 The guarded bridge allows `jit=true` only for this target, plain ARM64,
 matching `GUEST_ARM64`, `ISH_JIT`, `ISH_JIT_NO_EMIT`, `ISH_AOT_BOOTSTRAP`

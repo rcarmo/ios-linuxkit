@@ -778,6 +778,10 @@ dword_t sys_execve(addr_t filename_addr, addr_t argv_addr, addr_t envp_addr) {
         // GC. Keep GC enabled, but make it serial/non-concurrent in the guest.
         { "JSC_numberOfGCMarkers=1", 22, 0 },  // Avoid multi-marker GC suspend hangs
         { "JSC_useConcurrentGC=0", 19, 0 },     // Keep Bun timers/server progress reliable
+        // New Bun releases disable JSC_* environment options and instead
+        // apply BUN_JSC_* during engine initialisation. Keep both versions safe.
+        { "BUN_JSC_numberOfGCMarkers=1", 26, 0 },
+        { "BUN_JSC_useConcurrentGC=0", 23, 0 },
     };
     for (size_t vi = 0; vi < sizeof(inject_envs)/sizeof(inject_envs[0]); vi++) {
         char *e = envp;

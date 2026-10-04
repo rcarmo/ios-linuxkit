@@ -166,7 +166,8 @@ source-review results for earlier app changes.
 The native/AOT backend is tested with linked Linux ELF images. The isolated
 `iSH-ARM64-AOT-Bootstrap` scheme now compiles that backend with runtime emission
 disabled and matching app/library definitions. It uses a separate bundle ID,
-app group and Meson directory. Startup forces `ISH_JIT=0`; no images are linked
+private app-container filesystem and Meson directory. Startup forces `ISH_JIT=0`;
+no images are linked
 and the app fault adapter is not installed. Reference schemes remain gadgets.
 
 `sh scripts/build-ios-aot-bootstrap.sh DERIVED_DATA CODE_SIGNING_ALLOWED=NO`
