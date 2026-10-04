@@ -49,7 +49,7 @@ test('Native object inspection rejects code mapping but permits context data map
 
 test('Observed contract refuses bootstrap, emitter and fabricated conventions', () => {
   const layout = { ready: 1, emission_compiled: 0, pic: 1, abi: 0x12345678,
-    code_version: 10, prologue_words: 20, entry_off: 76, n_pinned: 16,
+    code_version: 11, prologue_words: 20, entry_off: 76, n_pinned: 16,
     arch: 'aarch64', pointerBits: 64, little_endian: 1 };
   const build = appleBuildVersion(binary());
   expect(observedContract(layout, 'binary-hash', build, 'target debugger observation')).toMatchObject({

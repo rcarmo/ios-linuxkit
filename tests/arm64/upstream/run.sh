@@ -87,6 +87,9 @@ check "$TMP/exit-current.log" 'exit-current-ok' "$TMP/exit-current"
 check "$TMP/task-start.log" 'task-start-rollback-ok' "$TMP/task-start"
 check "$TMP/jit-oom.log" 'jit-oom-guest-kill-dispatch-ok' "$TMP/jit-oom"
 check "$TMP/gen-oom.log" 'gen-oom-actual-emitter-ok' "$TMP/gen-oom"
+"$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/dczva-retry.c" "${libs[@]}" -o "$TMP/dczva-retry"
+check "$TMP/dczva-retry.log" 'dczva-precise-retry-ok offsets=64' "$TMP/dczva-retry"
 # The renamed/discarded CLI main loses C's implicit return-0 rule. Suppress
 # that warning only; exercise the real handler with an exact byte-footprint test.
 "$CC" -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-return-type \

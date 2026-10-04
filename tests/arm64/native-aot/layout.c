@@ -44,7 +44,7 @@ int main(int argc,char **argv) {
     assert(jit_layout_read(&after)==0);
     assert(after.ready==(!strcmp(argv[1],"init") || !strcmp(argv[1],"prepare")));
     if(after.ready) {
-        assert(after.abi==jit_abi() && after.abi==0x3f650e41 && after.code_version==10);
+        assert(after.abi==jit_abi() && after.abi==0x589f6cec && after.code_version==11);
         assert(after.pic && after.n_pinned==(unsigned)n_pinned && after.entry_off==entry_off());
     } else assert(!after.abi && !after.n_pinned);
     struct jit_layout copy;

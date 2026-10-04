@@ -2757,6 +2757,10 @@ static int gen_branch(struct gen_state *state, uint32_t insn) {
         // Data cache zero by VA. DCZID_EL0 below advertises a 64-byte block.
         if ((insn & 0xffffffe0) == 0xd50b7420) {  // DC ZVA
             uint32_t rt = insn & 0x1f;
+            // Although decoded as a system instruction, this writes memory.
+            // A CoW fault must retry the zero, not replay earlier loop updates.
+            gen(state, (unsigned long) gadget_set_jit_saved_pc);
+            gen(state, state->orig_ip);
             gen(state, (unsigned long) gadget_dc_zva);
             gen(state, rt);
             return 1;
