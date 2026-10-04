@@ -16,7 +16,7 @@ The Linux command-line build requires an AArch64 host because its gadget files c
 | Validation kernel | `6.6.89-cix` (AArch64) |
 | Workspace storage | NVMe, ext4 |
 
-These specifications identify the test host. Smaller hosts have not been benchmarked. The `test-arm64-fcvt-vector` gate also uses the host CPU as an AArch64 floating-point oracle.
+These specifications identify the test host. Smaller hosts have not been benchmarked. The `test-arm64-fcvt-vector` check also uses the host CPU as an AArch64 floating-point oracle.
 
 ## Dependencies
 
@@ -165,7 +165,7 @@ Both paths must be absolute. The suffix defaults to read-write; use `:ro` for a 
 
 ## Focused AdvSIMD conversion test
 
-The focused conversion gate builds one static AArch64 fixture on the host, runs it natively, then runs the same binary under iSH:
+The focused conversion check builds one static AArch64 fixture on the host, runs it natively, then runs the same binary under iSH:
 
 ```sh
 CC=clang make test-arm64-fcvt-vector
@@ -175,7 +175,7 @@ The target uses `debian-arm64-fakefs` by default and creates that fakefs through
 
 ## Precise load-PC and paired performance tests
 
-With a prepared `debian-arm64-fakefs`, run the native-oracle and guest retry gate:
+With a prepared `debian-arm64-fakefs`, run the native-oracle and guest retry check:
 
 ```sh
 CC=clang make test-arm64-load64-fault-pc

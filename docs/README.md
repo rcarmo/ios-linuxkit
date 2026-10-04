@@ -11,10 +11,10 @@ The maintained documentation describes the current `master` branch. Dated eviden
 | [IOS_APPLICATION.md](IOS_APPLICATION.md) | Xcode schemes, rootfs packaging, signing boundary and embedding interfaces. |
 | [NATIVE_AOT_BUILD_PLAN.md](NATIVE_AOT_BUILD_PLAN.md) | Build, train, link, run and measure Linux AOT. |
 | [NATIVE_AOT_ARTIFACT_KIT.md](NATIVE_AOT_ARTIFACT_KIT.md) | Freeze a guest, restore inputs, validate and publish a reusable build. |
-| [NATIVE_AOT_IOS.md](NATIVE_AOT_IOS.md) | Observe target layout/ABI, generate Mach-O and integrate the uninstalled app adapter on Apple hardware. |
+| [NATIVE_AOT_IOS.md](NATIVE_AOT_IOS.md) | Build, sign and test an accelerated iOS app. |
 | [NATIVE_OFFLOAD.md](NATIVE_OFFLOAD.md) | Startup registration, legacy/cooperative ownership, guest VFS, cancellation, restricted TCP and test-only local-copy contracts. |
 | [NETLINK_TAILSCALE.md](NETLINK_TAILSCALE.md) | Opt-in read-only interface discovery, isolated Tailscale probe and networking limits. |
-| [VALIDATION.md](VALIDATION.md) | Build and runtime gates, focused fixtures, reports and failure rules. |
+| [VALIDATION.md](VALIDATION.md) | Build and runtime tests, results and failure rules. |
 | [LIMITATIONS.md](LIMITATIONS.md) | Security model, compatibility shims, incomplete facilities and unsupported workloads. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Source, test and documentation requirements for changes. |
 | [RELEASES.md](RELEASES.md) | App versions, Apple build numbers, Git tags and release checks. |

@@ -1,33 +1,33 @@
 # Validation
 
-Every runtime change needs a focused regression and a broader gate. The Makefile records the supported Linux-host workflows. Broad runtime, CLI and performance scripts write Markdown reports under `REPORT_DIR`; small instruction fixtures can report only their pass marker and exit status.
+Every runtime change needs a focused regression and a broader check. The Makefile records the supported Linux-host workflows. Broad runtime, CLI and performance scripts write Markdown reports under `REPORT_DIR`; small instruction fixtures can report only their pass marker and exit status.
 
 ## Host and test data
 
-The maintained gates run on an Orange Pi 6 Plus: CIX P1 (CD8180/CD8160), eight
+The maintained checks run on an Orange Pi 6 Plus: CIX P1 (CD8180/CD8160), eight
 Cortex-A720 and four Cortex-A520 cores, 16 GB-class RAM (about 14 GiB visible),
 NVMe/ext4, native Debian Trixie, Linux 6.6.89-cix AArch64, 4 KiB pages and
 Clang 19.1.7. Apple SDK, signing and physical-device tests require another host.
 
 Runtime tests modify their fakefs when they install missing packages. Copy the rootfs or rebuild it when package state must be reproducible. Network and package repositories can make broad suites non-deterministic even when the emulator is unchanged.
 
-## Route-netlink networking gate
+## Route-netlink networking check
 
 The opt-in [route-netlink guide](NETLINK_TAILSCALE.md) describes the native/guest
 message tests, bounded encoder sanitizers and an isolated official Tailscale
 probe. A control-server authentication URL is not proof of account login or
 tunnel traffic. The default-off switch, route/notification limits and Apple-device
-gates must remain explicit in release evidence.
+checks must remain explicit in release evidence.
 
 ## App configuration guard
 
 `make test-xcode-gadget-guard` runs the actual Xcode/Meson bridge with fixture
 Meson responses for fresh/reused directories and propagated configuration errors.
-Existing app targets explicitly select gadgets, disable native emission and clear
+Reference app targets explicitly select gadgets, disable native emission and clear
 CLI AOT images together. Apple compilation, fault-path integration, signing and
-device validation remain separate gates.
+device validation remain separate checks.
 
-## Build gate
+## Build check
 
 ```sh
 CC=clang make build-arm64-linux-all
@@ -35,9 +35,9 @@ CC=clang make build-arm64-linux-all
 
 This builds release and debug variants. Treat compiler errors, assembler errors and warnings introduced by the change as failures.
 
-## Runtime gates
+## Runtime checks
 
-| Gate | Command | Scope |
+| Check | Command | Scope |
 |---|---|---|
 | Scalar saturation | `CC=clang make test-arm64-scalar-saturation` | 19,696 native/guest B/H/S/D add/subtract cases, aliases, full destination clearing, cumulative FPSR.QC and NZCV. |
 | Gzip compatibility/cleanup | `CC=clang make test-arm64-gzip ROOTFS_DIR=/absolute/disposable-alpine-fakefs` | Same frozen BusyBox native/guest compressed bytes, host/guest inflate, bad-input status and file lifecycle; deterministic corpus and hashes, no package fetch. |
@@ -50,7 +50,7 @@ This builds release and debug variants. Treat compiler errors, assembler errors 
 | Regular-file readiness | `CC=clang make ROOTFS_DIR=/path/to/fakefs test-arm64-poll-regular` | Native oracle and guest poll/ppoll/select/pselect, access modes/EOF/dup/directory, mixed pipe readiness, epoll semantics and actual shell read. |
 | Upstream correctness/lifetime | `CC=clang make test-arm64-upstream` | FMOV512/syscall52 native oracles, timers/signals, precise waits, bounded proc/orphan races, actual-archive JIT/task/OOM/accounting injection, normal-exit TLS handoff, real CLI crash-context checks, CoW/ptrace allocation rollback, failed signal-frame termination, lazy/stack/CoW lock-upgrade revalidation and offload policy/exec guards. |
 | Offload filesystem context | `CC=clang make test-arm64-native-fs` | Actual VFS realfs/fakefs roots, snapshot CWD/root, symlinks/mounts/metadata/umask, permissions, allocation rollback and concurrent guest callers; no host chdir or disk-I/O deadline claim. |
-| Cooperative context execution | `CC=clang make test-arm64-offload-context` | Actual-source Linux adapter: raw argv, VFS/mount/metadata, seven allocation rollbacks, concurrent independent CWDs, startup freeze and sibling/group-exit refusal; aborts on host chdir/scans/pipes. Stream/token tests are a separate gate; no Apple claim. |
+| Cooperative context execution | `CC=clang make test-arm64-offload-context` | Actual-source Linux adapter: raw argv, VFS/mount/metadata, seven allocation rollbacks, concurrent independent CWDs, startup freeze and sibling/group-exit refusal; aborts on host chdir/scans/pipes. Stream/token tests are a separate check; no Apple claim. |
 | Cooperative bounded streams/token | `CC=clang make test-arm64-offload-io` | 39 actual-dispatcher TCP modes: backpressure/cancellation/errors/limits/rollback, no flag mutation, exact cleanup; 1,000 actual signal/completion races and fork isolation. Unsupported TTY/file/pipe/Unix stdio refused; not Apple proof or a universal I/O watchdog. |
 | Cooperative local-copy example | `CC=clang make test-arm64-offload-local-copy` | Test-only actual-dispatcher/VFS handler: 51 modes each on realfs/fakefs, exclusive new output, partial retention, allocations/metadata/I/O/cancellation/cleanup and work limits. No disk-latency or Apple claim. |
 | Native offload setup | `CC=clang make test-arm64-offload-setup` | Actual-source Linux handler/POSIX adapters; allocation/pipe/thread/spawn rollback, reference/CWD/process preservation, short output, CLOEXEC and low-host-fd cases. Not Darwin app evidence or bounded I/O. |
@@ -88,12 +88,11 @@ contains the original wrong-width store regression.
 
 `test-arm64-native-emitter` uses actual Linux faults to check exact native
 restart at O0/O2, prefix side effects, register/memory results and ABI rejection.
-The native tests also exercise the uninstalled app adapter under Linux
-SA_SIGINFO, plus read-only layout diagnostics before/after normal initialisation.
-These do not prove Apple context or app integration. Apple app fault recovery
-needs adapter installation and device tests in [iOS AOT](NATIVE_AOT_IOS.md).
+The Linux tests also exercise the portable app fault handler and layout
+diagnostics. They cannot check iOS signal contexts or physical-device behavior.
+Run the Apple fault tests and device checks described in [iOS AOT](NATIVE_AOT_IOS.md).
 
-## Cooperative offload gates
+## Cooperative offload checks
 
 [Offload contracts](NATIVE_OFFLOAD.md) describe legacy setup versus the new
 startup-only guest-context path. Run all five focused targets in gadget/native
@@ -104,7 +103,7 @@ joined workers, token cleanup and replacement-safe partial-output checks.
 
 Freeze source/runners before launching evidence runs. Use a new output directory,
 wait for every runner to exit and verify source hashes before accepting its
-return-code files. Both frozen linked-image gates must pass without retraining
+return-code files. Both frozen linked-image checks must pass without retraining
 or ABI overrides when the shared native layout/recovery path changes.
 
 ## Runtime coverage stages
@@ -139,7 +138,7 @@ tests/arm64/upstream/
 
 They contain fixtures for CAS pairs, exclusive monitor clearing, exclusive widths, pair exclusives, AdvSIMD floating-point conversions, `LDPSW`, precise LDR fault/retry PCs, procfs and full-width file seek semantics, CPU poke delivery and per-thread alternate signal stacks. Presence of a fixture is not a passing result; see the current exclusions below. New low-level work should add a similarly small fixture and include it in a repeatable script or runtime row.
 
-The load-PC gate requires a prepared fakefs and a native AArch64 Linux host with 4 KiB pages. Run the debug variant directly:
+The load-PC check requires a prepared fakefs and a native AArch64 Linux host with 4 KiB pages. Run the debug variant directly:
 
 ```sh
 CC=clang ISH_BIN="$PWD/build-arm64-linux-debug/ish" \
@@ -172,7 +171,7 @@ Unsupported facilities must be reported as unsupported with a reason. Package ab
 
 ## Diagnostics during tests
 
-`ISH_ARM64_BLOCK_STATS=1` and `ISH_ARM64_FUSION_STATS=1` intentionally add output. Use them for performance investigations. Disable them in exact-output correctness gates. Fault and PC tracing can also perturb timing and produce large logs.
+`ISH_ARM64_BLOCK_STATS=1` and `ISH_ARM64_FUSION_STATS=1` intentionally add output. Use them for performance investigations. Disable them in exact-output correctness checks. Fault and PC tracing can also perturb timing and produce large logs.
 
 When a broad row fails, rerun its exact guest command with a bounded timeout. Preserve:
 
@@ -193,8 +192,8 @@ When a broad row fails, rerun its exact guest command with a bounded timeout. Pr
 | [AOT host integration](reports/audits/AOT_ALPINE_HOST_2026-09-29.md) | Four linked images, exact restart, native oracles and release/debug stress. |
 | [Reusable artifacts](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md) | Restored guest identity, no-retraining rebuild, execution PCs, timings/RSS and Apple handoff limits. |
 | [TCP/token isolation](reports/audits/OFFLOAD_BOUNDED_IO_2026-10-02.md) | Four-lane restricted-stream/cancellation proof; unsupported Apple terminal path. |
-| [Local-copy example](reports/audits/OFFLOAD_LOCAL_COPY_2026-10-02.md) | Test-only exclusive output, partial retention, metadata/allocation/I/O failure and cleanup gates. |
-| [Shared recovery](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md) | CLI/uninstalled-app adapters and read-only layout, Linux restart/oracle and frozen-image gates. |
+| [Local-copy example](reports/audits/OFFLOAD_LOCAL_COPY_2026-10-02.md) | Test-only exclusive output, partial retention, metadata/allocation/I/O failure and cleanup checks. |
+| [Shared recovery](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md) | CLI/uninstalled-app adapters and read-only layout, Linux restart/oracle and frozen-image checks. |
 
 Earlier broad-suite failures include Debian package detection selecting
 Alpine's `build-base`, a glibc alternate-stack fixture exiting during
@@ -219,7 +218,7 @@ git diff --check
 git status --short
 ```
 
-Run the focused regression and the release runtime gate for behavioural changes. Use the debug gate for memory, signal, concurrency and translated-execution changes. Check Markdown links after moving documentation. Version or release changes must also follow [RELEASES.md](RELEASES.md).
+Run the focused regression and the release runtime check for behavioural changes. Use the debug check for memory, signal, concurrency and translated-execution changes. Check Markdown links after moving documentation. Version or release changes must also follow [RELEASES.md](RELEASES.md).
 
 ## Native/AOT and artifact checks
 

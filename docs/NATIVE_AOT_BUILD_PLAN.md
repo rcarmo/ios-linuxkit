@@ -129,7 +129,7 @@ EVIDENCE_DIR="$WORK/linked-release" make test-arm64-linked-aot \
   RELEASE_BUILD_DIR=build-arm64-aot ROOTFS_DIR="$ROOT" AOT_RECORD_DIR="$RECORDINGS"
 ```
 
-The gate requires four accepted images, zero rejections, positive installs for
+The check requires four accepted images, zero rejections, positive installs for
 each module, zero emitted segments/units/bytes and matching workload results
 with AOT on and off. It also checks the no-emitter compiler define and object
 imports. Executable mappings for the application and host libraries still exist.
@@ -181,7 +181,7 @@ bun tests/arm64/native-aot/execution.ts \
 ```
 
 Historical targets use `DEBIAN_ROOTFS_DIR` even for Alpine; set both rootfs
-variables. The full procfs gate runs a native control and two guest repetitions,
+variables. The full procfs check runs a native control and two guest repetitions,
 each 25s with 16 forkers and six readers. Keep its progress checks and timeout.
 The emitter harness covers exact native fault/retry state at O0/O2, the callable
 native-only app adapter under Linux signals, and read-only diagnostics before/

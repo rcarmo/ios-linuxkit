@@ -7,6 +7,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {join,relative,resolve} from 'node:path';
 export const root=resolve(import.meta.dir,'..');
 export const rules:[string,RegExp][]=[
+ ['internal jargon',/\b(tranche|source ledger|(?:acceptance|handoff) gates?|four-lane gates?)\b/i],
  ['filler',/\b(it is worth noting|it bears mentioning|in order to|that said|for the avoidance of doubt|here is the (?:thing|kicker))\b/i],
  ['sincerity',/\b(honestly|to be honest|truth be told|the honest truth|in all honesty)\b/i],
  ['inflation',/\b(seamless(?:ly)?|holistic|transformative|enterprise-grade|best-in-class|state-of-the-art|synergy|tapestry|delve|revolutionise)\b/i],

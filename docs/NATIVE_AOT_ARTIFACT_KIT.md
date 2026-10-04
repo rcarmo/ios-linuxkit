@@ -203,9 +203,8 @@ done
 Send the archive checksum through a trusted channel. Do not modify sealed files
 or add logs within a completed payload. Retain new run evidence beside it.
 
-The [29 September delivery](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md) includes
-Linux and iOS-input archives made from the prototype. Their hashes and source
-revisions identify those original files. Subsequent source releases, including
-2.4.1, do not relabel or replace them. The frozen Linux ABI remains unchanged by
-the shared-recovery extraction. The [iOS procedure](NATIVE_AOT_IOS.md) uses the seed's
-exact files and records the additional target checks.
+The [29 September archives](reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md) were
+created for an older emulator build. Later emulator updates may invalidate
+their translations. Generate new recordings when configuration or guest files
+change; never alter compatibility values to make old artifacts pass.
+Follow the [iOS instructions](NATIVE_AOT_IOS.md) for Apple builds.

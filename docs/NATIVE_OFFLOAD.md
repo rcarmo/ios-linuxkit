@@ -17,7 +17,7 @@ uses the legacy fake handler; it is not real FFmpeg or a cooperative handler.
 |---|---|---|---|
 | Legacy in-process | `native_offload_add_handler` | Host-path translation, process-wide host CWD, later fakefs metadata scans. | Pipe forwarders; no bounded cancellation guarantee. |
 | macOS host executable | `native_offload_add` / CLI `-n NAME=PATH` | Existing host-path/redirect-library integration. | Checked spawn setup, owned forwarders and child reap. |
-| Cooperative in-process | `native_offload_add_cooperative_handler` | Raw guest argv and retained guest VFS root/CWD/umask; no host chdir, rewriting or directory scans. | Guest-thread-owned borrowed context; explicit checkpoints; restricted stream admission. |
+| Cooperative in-process | `native_offload_add_cooperative_handler` | Raw guest argv and retained guest VFS root/CWD/umask; no host chdir, rewriting or directory scans. | Guest-thread-owned borrowed context; explicit checkpoints; restricted stream restrictions. |
 
 Generic `ffmpeg`/`ffprobe` offloads match exact `/bin`, `/usr/bin` or
 `/usr/local/bin` executable paths. Relative/private paths and readable shebang
@@ -55,7 +55,7 @@ Eligible unblocked, nonignored INT/TERM/HUP/QUIT requests are sticky; SIGKILL
 has priority. Forked children clear native token/proxy/pid state. Signals win at
 completion; other pending signals retain their ordinary queue semantics.
 
-## Restricted stream admission
+## Restricted stream restrictions
 
 Only connected INET/INET6 TCP stdio using the actual guest socket operations is
 admitted. Unconnected sockets, datagrams, Unix sockets, custom backends, TTYs,
@@ -112,7 +112,7 @@ The actual-source Linux adapters cover setup rollback, VFS concurrency and
 ownership, 39 TCP dispatcher modes, 1,000 signal/completion races and 51
 local-copy modes on each of realfs/fakefs. Use matching gadget/native build
 archives. [Validation](VALIDATION.md) supplies broader release/debug, procfs,
-compatibility and frozen-AOT gates. Dated evidence is in the
+compatibility and frozen-AOT checks. Dated evidence is in the
 [setup](reports/audits/OFFLOAD_SETUP_2026-10-02.md),
 [filesystem](reports/audits/OFFLOAD_FS_CONTEXT_2026-10-02.md),
 [context](reports/audits/OFFLOAD_CONTEXT_EXEC_2026-10-02.md),

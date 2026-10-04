@@ -132,7 +132,7 @@ hosts and guests named in each report.
 | [Route-netlink and Tailscale](docs/NETLINK_TAILSCALE.md) | Opt-in host interface discovery and isolated userspace networking tests. |
 | [AOT artifacts](docs/NATIVE_AOT_ARTIFACT_KIT.md) | Freezing, restoring, validating and publishing reusable inputs/builds. |
 | [iOS AOT](docs/NATIVE_AOT_IOS.md) | Target compatibility checks, Mach-O conversion and Apple integration. |
-| [Validation](docs/VALIDATION.md) | Test gates, reports and failure rules. |
+| [Validation](docs/VALIDATION.md) | Test checks, reports and failure rules. |
 | [Limitations](docs/LIMITATIONS.md) | Security, compatibility and unsupported workloads. |
 | [Contributing](docs/CONTRIBUTING.md) | Change and documentation requirements. |
 | [Versioning and releases](docs/RELEASES.md) | App versions, build numbers, Git tags and release checks. |

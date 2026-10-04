@@ -62,7 +62,7 @@ Large lazy reservations record ranges and permissions without allocating every p
 
 ## Fault recovery
 
-A host `SIGSEGV` or `SIGBUS` can occur inside a memory gadget when a guest access needs copy-on-write, stack growth or page materialisation. Faultable operations save their guest instruction address in `fiber_frame::jit_saved_pc`. The shared core in `platform/native_fault.c` reads the OS context through `platform/host_context_aarch64.h` and redirects execution to `jit_crash_trampoline`; the CLI adapter in `main.c` keeps its signal policy. The dispatch loop resolves the guest fault and retries that instruction. The callable app adapter refuses gadget replay and is not installed by existing app schemes.
+A host `SIGSEGV` or `SIGBUS` can occur inside a memory gadget when a guest access needs copy-on-write, stack growth or page materialisation. Faultable operations save their guest instruction address in `fiber_frame::jit_saved_pc`. The shared core in `platform/native_fault.c` reads the OS context through `platform/host_context_aarch64.h` and redirects execution to `jit_crash_trampoline`; the CLI adapter in `main.c` keeps its signal policy. The dispatch loop resolves the guest fault and retries that instruction. The separate AOT test app installs native fault recovery; reference apps retain their existing fault handling.
 
 The precise saved address prevents earlier instructions in the same block from executing twice. Normal-register unsigned-immediate `LDR X` saves that address inside `load64_imm_fast`, consuming `[operands][guest PC]` together instead of dispatching a separate PC-save gadget. Its LDR+CBZ/CBNZ fusion already saves the LDR PC internally; other memory forms retain their existing saves. Operand-stream producers and consumers must change together.
 
@@ -112,8 +112,8 @@ Some host differences remain at their call sites:
 [Offload contracts](NATIVE_OFFLOAD.md) separate the existing legacy handler and
 macOS spawn paths from the startup-only cooperative API. Cooperative execution
 uses raw guest argv, retained VFS state and a guest-thread-owned cancellation
-context; it refuses sibling/exiting guest groups. Stream admission is restricted
-to connected TCP stdio with per-call nonblocking operations and work/retry limits.
+context; it refuses sibling/exiting guest groups. It supports only connected
+TCP stdio with per-call nonblocking operations and work/retry limits.
 No production cooperative handler is registered. The bounded local-copy example
 is test-only; disk operations have no universal latency guarantee. Legacy host
 CWD/path translation and blocking forwarders retain their existing behaviour.

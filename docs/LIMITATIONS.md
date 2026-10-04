@@ -111,15 +111,12 @@ increase binary size and memory use. The [29 September prototype](reports/audits
 measured about 12–13% improvement in shell/zlib workloads and a 15% Python
 slowdown, with Python peak RSS rising from 18.3MiB to 54.1MiB.
 
-Linux recordings contain native words and baked offsets. Apple reuse requires
-target ABI/symbol checks, app recovery/build integration and physical-device
-validation. Shared recovery includes a callable, uninstalled native-only app
-adapter, not an integrated Apple fault path. Read-only layout diagnostics report
-conventions only after normal backend initialisation (`ready=1`); values from a
-not-ready bootstrap or a Linux binary cannot substitute for an observed Apple
-contract. Reference Xcode schemes use gadgets; the AOT bootstrap compiles a
-no-emitter backend but forces native execution off. [Apple implementation steps](NATIVE_AOT_IOS.md)
-list the checks needed before distribution.
+Translations must match the app configuration and guest files on the target
+device. A Linux or Mac build cannot supply configuration values for an iPhone
+build. The separate AOT test app supports matching static translations, but
+reference schemes retain the normal interpreter. Physical-device stability,
+memory use and performance need checking before distribution. Follow the
+[Apple build instructions](NATIVE_AOT_IOS.md).
 
 ## Release tooling
 

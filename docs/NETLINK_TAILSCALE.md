@@ -111,7 +111,7 @@ Enabling interface snapshots does not enable cooperative handlers, admit arbitra
 socket types as handler stdio or bypass the offload stream limits. Source 2.4.1
 retains the same default-off switch and packaged Alpine pin.
 
-## Evidence and remaining gates
+## Evidence and remaining checks
 
 The [2.3.2 release report](reports/releases/IOS_LINUXKIT_2.3.2.md) records the
 local results. The official Tailscale 1.102.4 ARM64 archive was checked against

@@ -163,17 +163,14 @@ source-review results for earlier app changes.
 
 ## AOT app integration
 
-The native/AOT backend is tested with linked Linux ELF images. The isolated
-`iSH-ARM64-AOT-Bootstrap` scheme now compiles that backend with runtime emission
-disabled and matching app/library definitions. It uses a separate bundle ID,
-private app-container filesystem and Meson directory. Startup forces `ISH_JIT=0`;
-no images are linked
-and the app fault adapter is not installed. Reference schemes remain gadgets.
+The `iSH-ARM64-AOT-Bootstrap` scheme builds a separate test app with Bun.
+Acceleration is off by default. Set `AOT_IMAGE_EXECUTION=1` and provide matching
+translations through `AOT_IMAGES_DIR` to enable it. The app cannot generate
+executable code at runtime. Reference schemes use the normal interpreter.
 
 `sh scripts/build-ios-aot-bootstrap.sh DERIVED_DATA CODE_SIGNING_ALLOWED=NO`
 builds an unsigned device binary and inspects its actual SDK/platform, native
 compiler definitions, required symbols and absence of known emitter primitives.
-Signing and device validation remain separate gates. The bootstrap
-can expose `/proc/ish/jit-layout`, but `ready=0` cannot supply image conventions.
-The [Apple AOT procedure](NATIVE_AOT_IOS.md) covers observed contracts, fault
-adapter integration, static image linkage and device gates still required.
+Signing and physical-device testing are also required. The
+[Apple AOT instructions](NATIVE_AOT_IOS.md) cover generating matching
+translations, building the app and checking it on a device.
