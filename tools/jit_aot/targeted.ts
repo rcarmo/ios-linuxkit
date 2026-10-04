@@ -19,8 +19,9 @@ if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('invalid AOT_TIME
 const env = Object.fromEntries(Object.entries(process.env).filter(([k, v]) =>
     v !== undefined && !k.startsWith('ISH_JIT') && !k.startsWith('ISH_AOT'))) as Record<string, string>;
 function run(argv: string[], extra: Record<string, string> = {}) {
-    const r = Bun.spawnSync(['timeout', '-k', '3', String(timeout), ...argv], {
+    const r = Bun.spawnSync(argv, {
         env: { ...env, ...extra }, stdout: 'pipe', stderr: 'pipe', maxBuffer: 64 * 1024 * 1024,
+        timeout: Math.ceil(timeout * 1000), killSignal: 'SIGKILL',
     });
     return { status: r.exitCode, stdout: r.stdout.toString(), stderr: r.stderr.toString() };
 }

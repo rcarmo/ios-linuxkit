@@ -442,43 +442,19 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
         case SIGNAL_KILL:
             unlock(&sighand->lock); // do_exit must be called without this lock
 #ifdef GUEST_ARM64
-            // V8's IMMEDIATE_CRASH() uses BRK #0 on ARM64 (delivers SIGTRAP).
-            // Generic recovery: unwind the current function frame and return 0
-            // to the caller. This lets V8 continue past non-fatal CHECKs.
-            if (sig == SIGTRAP_) {
-                struct cpu_state *cpu = &current->cpu;
-                fprintf(stderr, "V8_SIGTRAP: pc=0x%llx x0=0x%llx sp=%llx fp=%llx lr=%llx\n",
-                        (unsigned long long)cpu->pc,
-                        (unsigned long long)cpu->regs[0],
-                        (unsigned long long)cpu->sp,
-                        (unsigned long long)cpu->regs[29],
-                        (unsigned long long)cpu->regs[30]);
-                do_exit_group(1 << 8);
-                return;
-            }
-            if (sig == SIGABRT_) {
-                // V8's abort() after Fatal. Just terminate cleanly.
-                struct cpu_state *cpu = &current->cpu;
-                fprintf(stderr, "V8_SIGABRT: pc=0x%llx sp=%llx fp=%llx lr=%llx\n",
+            if (sig == SIGTRAP_ || sig == SIGABRT_ || sig == SIGILL_ ||
+                    sig == SIGSEGV_ || sig == SIGBUS_) {
+                const struct cpu_state *cpu = &current->cpu;
+                lock(&pids_lock);
+                pid_t_ leader_pid = current->group->leader->pid;
+                pid_t_ parent_pid = current->group->leader->parent ? current->group->leader->parent->pid : 0;
+                unlock(&pids_lock);
+                fprintf(stderr, "GUEST_FATAL: sig=%d pid=%d leader=%d parent=%d pc=0x%llx sp=0x%llx fp=0x%llx lr=0x%llx\n",
+                        sig, current->pid, leader_pid, parent_pid,
                         (unsigned long long)cpu->pc,
                         (unsigned long long)cpu->sp,
                         (unsigned long long)cpu->regs[29],
                         (unsigned long long)cpu->regs[30]);
-                do_exit_group(1 << 8);
-                return;
-            }
-            // V8 scope corruption GPF cascade: the deep frame unwind in
-            // handle_interrupt may leave a background thread with a corrupt
-            // PC pointing into the V8 heap. When that thread tries to
-            // execute "code" at a heap address, it gets SIGILL.
-            // Flush the host-side stdout/stderr pipes before killing the
-            // process group, so buffered output (e.g. npm help) is visible.
-            if (sig == SIGILL_ || sig == SIGBUS_) {
-                struct cpu_state *cpu = &current->cpu;
-                if (cpu->pc >= 0xb0000000 && cpu->pc < 0xf0000000) {
-                    do_exit_group(1 << 8);
-                    return;
-                }
             }
 #endif
             do_exit_group(sig);

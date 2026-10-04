@@ -1541,6 +1541,7 @@
 			buildConfigurationList = A07000000000000000000004 /* Build configuration list for PBXNativeTarget "iSH-ARM64-AOT-Bootstrap" */;
 			buildPhases = (
 				AA000300AF96D90D00FFB7A4 /* Build Meson (ARM64) */,
+				A07000000000000000000008 /* Build Static Apple Images */,
 				AA0000081F96D90D00FFB7A4 /* Sources */,
 				AA0000091F96D90D00FFB7A4 /* Frameworks */,
 				A07000000000000000000007 /* Download AOT Root */,
@@ -2198,6 +2199,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$SRCROOT/app/xcode-build-arm64.sh\"\n";
+		};
+		A07000000000000000000008 /* Build Static Apple Images */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = (
+				"$(SRCROOT)/tools/jit_aot/archive-apple.ts",
+				"$(SRCROOT)/app/aot-empty.c",
+			);
+			name = "Build Static Apple Images";
+			outputPaths = (
+				"$(CONFIGURATION_BUILD_DIR)/libish_apple_aot.a",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/aot-build.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nexport PATH=\"$PATH:/opt/homebrew/bin:$HOME/.bun/bin\"\nbun \"$SRCROOT/tools/jit_aot/archive-apple.ts\"\n";
 		};
 		BB034E8C263643C10000A498 /* Generate APK Repositories File */ = {
 			isa = PBXShellScriptBuildPhase;

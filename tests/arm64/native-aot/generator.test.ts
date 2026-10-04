@@ -1,8 +1,9 @@
 import { test, expect } from 'bun:test';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 const root=resolve(import.meta.dir,'../../..');
-const dir=mkdtempSync('/workspace/tmp/ish-aot-generator-');
+const dir=mkdtempSync(join(tmpdir(),'ish-aot-generator-'));
 process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
 function python(code:string,...args:string[]){return Bun.spawnSync(['python3','-c',`import sys; sys.path.insert(0,${JSON.stringify(join(root,'tools/jit_aot'))}); `+code,...args],{stdout:'pipe',stderr:'pipe'});}
 test('ELF conversion keeps exact-size relocations, local labels and compact table sections',()=>{

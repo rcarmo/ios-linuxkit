@@ -201,7 +201,8 @@ Native builds expose a read-only JSON endpoint:
 TLB/context layouts, code version and compile-time emission setting. They do not
 call backend init, allocate, map executable memory or change pinning. Convention
 fields (`abi`, `prologue_words`, `entry_off`, `n_pinned`, `pic`) are usable only
-with `ready=1` after normal backend initialisation. A no-emitter/no-image or
+with `ready=1` after normal backend initialisation or explicit no-emitter
+`jit_aot_prepare_layout` startup preparation. A no-emitter/no-image or
 runtime-off process can report `ready=0` and zero conventions. Readiness does not
 mean images are accepted or code is executing. Gadget builds have no endpoint.
 
@@ -211,7 +212,8 @@ build; never relabel recordings. An Apple contract additionally requires actual
 SDK/platform, binary SHA-256 and calling-context evidence. The
 [shared-recovery report](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md)
 records Linux exact restart and native-only app-adapter tests; the app adapter
-is not installed by existing schemes.
+is now installed by the isolated Apple bootstrap, with real Darwin static-fault
+tests described in the [Apple report](reports/audits/APPLE_AOT_2026-10-04.md).
 
 ## Measure and update
 

@@ -3221,6 +3221,23 @@ int jit_control(const char *cmd, size_t len) {
 
 // Target diagnostics must not call pthread_once/jit_init: a bootstrap query
 // cannot authorise executable mappings or invent conventions from a recording.
+#ifdef ISH_JIT_NO_EMIT
+static pthread_once_t aot_layout_once = PTHREAD_ONCE_INIT;
+static void aot_layout_init(void) {
+    pic_on = true;
+    pin_on = !env_off("ISH_JIT_PIN");
+    pin_init(pin_on);
+    atomic_store_explicit(&layout_ready, true, memory_order_release);
+}
+#endif
+int jit_aot_prepare_layout(void) {
+#ifdef ISH_JIT_NO_EMIT
+    return pthread_once(&aot_layout_once, aot_layout_init) == 0 ? 0 : -1;
+#else
+    return -1;
+#endif
+}
+
 int jit_layout_read(struct jit_layout *out) {
     if(!out) return -1;
     struct jit_layout v={
@@ -3388,14 +3405,21 @@ static void jit_init(void) {
     link_off = env_off("ISH_JIT_LINK");
     loop_off = env_off("ISH_JIT_LOOP");
     simd_on = !env_off("ISH_JIT_SIMD");
-    pin_on = !env_off("ISH_JIT_PIN");
+#ifndef ISH_JIT_NO_EMIT
     // AOT images are PIC code, so PIC is the default once one is linked in.
     const char *pic = getenv("ISH_JIT_PIC");
     pic_on = pic ? pic[0] == '1' : have_images;
     if (!have_region)
         pic_on = true;
+#endif
+#ifdef ISH_JIT_NO_EMIT
+    if (jit_aot_prepare_layout() != 0)
+        return;
+#else
+    pin_on = !env_off("ISH_JIT_PIN");
     pin_init(pin_on);
     atomic_store_explicit(&layout_ready,true,memory_order_release);
+#endif
     cm_on = getenv("ISH_JIT_MAP") != NULL;
     rec_file = pic_on && have_region ? getenv("ISH_JIT_RECORD") : NULL;
     rec_mod = getenv("ISH_JIT_RECORD_MOD") ? getenv("ISH_JIT_RECORD_MOD") : "ld-musl";
@@ -3421,6 +3445,18 @@ struct jit_scratch {
 };
 static pthread_key_t scratch_key;
 static pthread_once_t scratch_once = PTHREAD_ONCE_INIT;
+int jit_aot_start(unsigned expected_images) {
+#ifdef ISH_JIT_NO_EMIT
+    if (!expected_images || jit_aot_prepare_layout() != 0 ||
+            pthread_once(&init_once, jit_init) != 0)
+        return -1;
+    return jit_on && aot_only && !region && aot_nimages == expected_images &&
+        !aot_nrejected ? 0 : -1;
+#else
+    (void)expected_images;
+    return -1;
+#endif
+}
 static __thread struct jit_scratch *scratch;
 
 static void scratch_key_init(void) {

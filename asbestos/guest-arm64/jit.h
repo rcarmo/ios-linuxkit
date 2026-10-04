@@ -110,7 +110,8 @@ void jit_report(void);
 
 // Read-only target contract. Never initialises the backend, allocates/maps code,
 // reads environment or changes pinning. Convention fields are zero until normal
-// backend initialisation has published them; layouts always reflect this build.
+// backend initialisation or explicit no-emitter preparation has published them;
+// layouts always reflect this build.
 struct jit_layout {
     uint32_t ready, abi, code_version, emission_compiled;
     uint32_t prologue_words, entry_off, n_pinned, pic;
@@ -120,6 +121,14 @@ struct jit_layout {
     uint64_t block_code, block_native_entry, ctx_block, ctx_slot, ctx_far;
     uint32_t pointer_bits, little_endian;
 };
+// Explicit startup preparation for a compiled no-emitter target. Selects the
+// same immutable PIC/pinning conventions used by image execution, without
+// enabling translation, accepting images or allocating executable memory.
+// Returns -1 in emitter builds; diagnostics themselves remain read-only.
+int jit_aot_prepare_layout(void);
+// Start compiled no-emitter execution only if all expected constructors survived
+// linking and their conventions match. Call before starting any guest threads.
+int jit_aot_start(unsigned expected_images);
 int jit_layout_read(struct jit_layout *layout); // -1 for NULL, 0 otherwise
 size_t jit_layout_describe(char *buf, size_t size); // bounded JSON, no initialisation
 

@@ -178,6 +178,8 @@ noreturn void do_exit(int status) {
 
         if (parent == NULL) {
             // init died
+            printk("GUEST_SHUTDOWN: pid=%d leader=%d status=%d (no parent)\n",
+                   current->pid, leader->pid, status);
             if (exit_hook != NULL)
                 exit_hook(current, status);
             halt_system();
@@ -433,6 +435,8 @@ static void halt_system(void) {
     // _exit() does not call atexit handlers, so we must do this explicitly.
     extern void restore_termios(void);
     restore_termios();
+
+    printk("GUEST_SHUTDOWN: exiting host process\n");
 
     // Force exit the entire host process. Orphaned guest threads
     // (stuck in JIT loops after do_exit_group force cleanup) keep

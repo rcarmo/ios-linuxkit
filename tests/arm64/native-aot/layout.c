@@ -33,12 +33,16 @@ int main(int argc,char **argv) {
         // diagnostics. It still lets normal init select PIC/pinning conventions.
         static struct aot_module rejected={.path="layout-fixture",.abi=1};
         ish_aot_register(&rejected);
+    } else if(!strcmp(argv[1],"prepare")) {
+        assert(jit_aot_prepare_layout()==0);
+        assert(!region && !jit_on && !aot_nregistered && !aot_nimages);
+        assert(setenv("ISH_JIT","0",1)==0);
     } else if(!strcmp(argv[1],"off")) assert(setenv("ISH_JIT","0",1)==0);
     else assert(!strcmp(argv[1],"empty"));
     assert(jit_units_begin()==NULL); // no accepted images or executable region
     inspecting=true;
     assert(jit_layout_read(&after)==0);
-    assert(after.ready==!strcmp(argv[1],"init"));
+    assert(after.ready==(!strcmp(argv[1],"init") || !strcmp(argv[1],"prepare")));
     if(after.ready) {
         assert(after.abi==jit_abi() && after.abi==0x3f650e41 && after.code_version==10);
         assert(after.pic && after.n_pinned==(unsigned)n_pinned && after.entry_off==entry_off());

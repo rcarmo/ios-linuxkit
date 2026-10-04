@@ -55,7 +55,7 @@ export function observedContract(layout: any, binarySha256: string, build: Retur
     endian: 'little', pointerBits: 64, ...build, codeVersion: layout.code_version, evidence };
 }
 
-async function inspect(buildDirectory: string, binary: string) {
+async function inspect(buildDirectory: string, binary: string, executionEnabled = false) {
   const options = JSON.parse(readFileSync(join(buildDirectory, 'meson-info/intro-buildoptions.json'), 'utf8'));
   const value = (name: string) => options.find((option: any) => option.name === name)?.value;
   if (value('jit') !== true || value('jit_emit') !== false || value('guest_arch') !== 'arm64' || value('cli_aot')?.length !== 0)
@@ -70,21 +70,43 @@ async function inspect(buildDirectory: string, binary: string) {
   const object = join(buildDirectory, 'libish_emu.a.p/asbestos_guest-arm64_jit.c.o');
   checkNoEmitter(checked(['nm', object]));
   const symbols = definedSymbols(checked(['nm', '-g', binary]));
-  for (const symbol of ['ish_aot_register', 'jit_layout_read', 'jit_layout_describe']) {
+  for (const symbol of ['ish_aot_register', 'jit_layout_read', 'jit_layout_describe', 'jit_aot_prepare_layout', 'ish_app_native_fault_install']) {
     if (!symbols.has(symbol)) throw Error(`bootstrap is missing defined symbol: ${symbol}`);
   }
   const build = appleBuildVersion(readFileSync(binary));
-  if (build.platform !== 'ios') throw Error('bootstrap script requires an iOS device build');
+  if (!['ios', 'ios-simulator'].includes(build.platform)) throw Error('bootstrap requires an iOS device or simulator build');
   const loadCommands = checked(['xcrun', 'otool', '-l', binary]);
-  if (/sectname\s+__ish_aot\b/.test(loadCommands)) throw Error('bootstrap must not contain linked AOT images');
-  console.log(JSON.stringify({ kind: 'apple-aot-bootstrap', binary: resolve(binary), binarySha256: await sha(binary),
-    ...build, runtimeEmissionCompiled: false, imageExecutionEnabled: false,
+  const haveImages = /sectname\s+__ish_aot\b/.test(loadCommands);
+  if (haveImages !== executionEnabled) throw Error('linked images do not match the requested execution mode');
+  if (executionEnabled) for (const name of ['musl', 'busybox', 'bun'])
+    if (!symbols.has(`ish_aot_module_${name}`)) throw Error(`missing static image: ${name}`);
+  console.log(JSON.stringify({ kind: executionEnabled ? 'apple-aot-linked' : 'apple-aot-bootstrap', binary: resolve(binary), binarySha256: await sha(binary),
+    ...build, runtimeEmissionCompiled: false, imageExecutionEnabled: executionEnabled,
     validation: 'compiled binary and backend object only; signing, observed ready ABI and device gates remain' }, null, 2));
+}
+
+export function bootstrapBuildPaths(settings: any) {
+  if (!Array.isArray(settings)) throw Error('expected Xcode build-settings array');
+  const targets = settings.filter(entry => entry.target === 'iSH-ARM64-AOT-Bootstrap');
+  if (targets.length !== 1) throw Error('missing/ambiguous bootstrap target settings');
+  const value = targets[0].buildSettings;
+  for (const key of ['MESON_BUILD_DIR', 'TARGET_BUILD_DIR', 'EXECUTABLE_PATH']) {
+    if (typeof value?.[key] !== 'string' || !value[key] || value[key].includes('$('))
+      throw Error(`missing/unexpanded Xcode build setting: ${key}`);
+  }
+  return { buildDirectory: resolve(value.MESON_BUILD_DIR), binary: join(value.TARGET_BUILD_DIR, value.EXECUTABLE_PATH) };
 }
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'inspect' && args.length === 2) await inspect(resolve(args[0]), resolve(args[1]));
+  else if (command === 'inspect-settings' && args.length === 1) {
+    const settings = JSON.parse(readFileSync(args[0], 'utf8'));
+    const paths = bootstrapBuildPaths(settings);
+    const value = settings.find((entry: any) => entry.target === 'iSH-ARM64-AOT-Bootstrap').buildSettings.AOT_IMAGE_EXECUTION;
+    if (!['0', '1'].includes(value)) throw Error('missing/invalid AOT execution setting');
+    await inspect(paths.buildDirectory, paths.binary, value === '1');
+  }
   else if (command === 'contract' && args.length === 4) {
     const [binary, layoutFile, output, evidence] = args;
     const build = appleBuildVersion(readFileSync(binary));
@@ -92,7 +114,7 @@ async function main() {
     writeFileSync(output, JSON.stringify(contract, null, 2) + '\n', { flag: 'wx' });
     console.log(`Wrote observed Apple contract: ${output}`);
   } else {
-    console.log('apple.ts inspect MESON_BUILD_DIRECTORY APP_BINARY\napple.ts contract SYMBOL_BINARY OBSERVED_LAYOUT.json NEW_CONTRACT.json EVIDENCE');
+    console.log('apple.ts inspect MESON_BUILD_DIRECTORY APP_BINARY\napple.ts inspect-settings XCODE_SETTINGS.json\napple.ts contract SYMBOL_BINARY OBSERVED_LAYOUT.json NEW_CONTRACT.json EVIDENCE');
     if (command && command !== 'help') throw Error('invalid arguments');
   }
 }

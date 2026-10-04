@@ -38,7 +38,7 @@ for (const opt of ['-O0', '-O2']) {
     const layout = join(out, 'layout' + opt);
     run([process.env.CC || 'clang', ...flags, join(import.meta.dir, 'layout.c'),
         '-Wl,--wrap=malloc', '-Wl,--wrap=calloc', '-Wl,--wrap=mmap', '-o', layout]);
-    for (const mode of ['empty', 'off', 'init']) run(['timeout', '-k', '2', '30', layout, mode]);
+    for (const mode of ['empty', 'off', 'init', 'prepare']) run(['timeout', '-k', '2', '30', layout, mode]);
     for (const [name, sources] of [
         ['restart', ['restart.c', 'restart-call.S']],
         ['preservation', ['preservation.c', 'call.S', 'diff-call.S']],

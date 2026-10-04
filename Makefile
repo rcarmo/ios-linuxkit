@@ -101,6 +101,14 @@ test-aot-kit:
 test-xcode-gadget-guard:
 	bun test tests/arm64/native-aot/xcode-guard.test.ts tests/arm64/native-aot/apple.test.ts
 
+APPLE_AOT_BUILD_DIR ?= build-arm64-native-noemit
+.PHONY: test-apple-aot
+test-apple-aot:
+	@test -f "$(APPLE_AOT_BUILD_DIR)/build.ninja" || $(MESON) setup "$(APPLE_AOT_BUILD_DIR)" -Dguest_arch=arm64 -Djit=true -Djit_emit=false --buildtype=debugoptimized
+	$(MESON) configure "$(APPLE_AOT_BUILD_DIR)" -Dguest_arch=arm64 -Djit=true -Djit_emit=false -Dcli_aot=
+	$(NINJA) -C "$(APPLE_AOT_BUILD_DIR)"
+	BUILD_DIR="$(abspath $(APPLE_AOT_BUILD_DIR))" bun tests/arm64/native-aot/apple-run.ts
+
 test-arm64-linked-aot:
 	ISH_BIN="$(abspath $(RELEASE_BUILD_DIR))/ish" ROOTFS="$(ROOTFS_DIR)" AOT_RECORD_DIR="$(AOT_RECORD_DIR)" bash tests/arm64/native-aot/run-linked.sh
 

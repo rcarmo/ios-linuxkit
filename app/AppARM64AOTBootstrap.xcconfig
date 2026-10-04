@@ -7,10 +7,11 @@ PRODUCT_APP_GROUP_IDENTIFIER = group.$(ROOT_BUNDLE_IDENTIFIER).aot-bootstrap
 CODE_SIGN_ENTITLEMENTS = app/AOTBootstrap.entitlements
 MESON_BUILD_DIR = $(CONFIGURATION_BUILD_DIR)/meson-aot-bootstrap
 ARCHS = arm64
-GCC_PREPROCESSOR_DEFINITIONS = $(inherited) ISH_JIT=1 ISH_JIT_NO_EMIT=1 ISH_AOT_BOOTSTRAP=1
+AOT_IMAGE_EXECUTION = 0
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited) ISH_JIT=1 ISH_JIT_NO_EMIT=1 ISH_AOT_BOOTSTRAP=1 ISH_AOT_IMAGE_EXECUTION=$(AOT_IMAGE_EXECUTION)
 
 // Keep the symbol binary usable by the checked Mach-O image generator.
 DEAD_CODE_STRIPPING = NO
 STRIP_INSTALLED_PRODUCT = NO
 COPY_PHASE_STRIP = NO
-OTHER_LDFLAGS = $(inherited) -Wl,-u,_ish_aot_register -Wl,-u,_jit_layout_read
+OTHER_LDFLAGS = $(inherited) -Wl,-u,_ish_aot_register -Wl,-u,_jit_layout_read -Wl,-force_load,$(CONFIGURATION_BUILD_DIR)/libish_apple_aot.a

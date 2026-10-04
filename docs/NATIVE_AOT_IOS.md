@@ -3,11 +3,14 @@
 The repository can generate Mach-O assembly from retained PIC recordings.
 An isolated `iSH-ARM64-AOT-Bootstrap` target now compiles the native backend
 with no runtime emitter, retains its symbols and runs gadgets only. The iOS app
-still needs actual fault-adapter installation and validated image linkage before
-those images can execute. The separate
+installs a native-checkpoint-only fault adapter and observes its no-emitter ABI.
+It can also link checked static musl/BusyBox/Bun images when explicitly enabled.
+The separate
 [shared-recovery preparation](reports/audits/SHARED_NATIVE_RECOVERY_2026-10-02.md)
-contains Linux-validated source scaffolding. No existing app scheme installs
-that adapter, and no accelerated Apple archive has been built or device-tested.
+contains the original Linux-validated source scaffolding. Real Darwin fault
+tests, static CLI execution and simulator app startup are now covered; physical
+device execution and pi stability remain separate acceptance gates. See the
+[Apple integration report](reports/audits/APPLE_AOT_2026-10-04.md).
 
 Use this procedure on an Apple Silicon Mac after reproducing the
 [Linux AOT build](NATIVE_AOT_BUILD_PLAN.md). Keep the existing gadget-only schemes
@@ -24,7 +27,7 @@ they require comparison with the actual target build.
 
 On the Mac, install Xcode/command-line tools, Bun, Python3, Meson and Ninja.
 Generation uses Apple `nm` and host `tar`. Record the Mac model/SoC/RAM,
-macOS/Xcode/SDK versions, and target iPhone/iPad model/SoC/RAM/iOS version. These
+macOS/Xcode/SDK versions, and target iPhone/iPad model/SoC/RAM/iOS version.
 The first bootstrap build and device-install results are recorded in the
 [Bun/pi test-build report](reports/benchmarks/PI_BUN_DARWIN_2026-10-04.md).
 
@@ -99,14 +102,18 @@ device installation is for testing; intermittent guest crashes remain unresolved
 The guarded bridge allows `jit=true` only for this target, plain ARM64,
 matching `GUEST_ARM64`, `ISH_JIT`, `ISH_JIT_NO_EMIT`, `ISH_AOT_BOOTSTRAP`
 definitions and a separate `meson-aot-bootstrap` directory. Emission and CLI
-images are always cleared together. Startup forces the backend off; no native
-fault adapter is installed and no images are linked.
+images are always cleared together. Default startup keeps image execution off.
+The installed adapter forwards non-native faults to the previous signal policy
+and stops unmatched native faults; it does not enable gadget replay.
 
 `tools/jit_aot/apple.ts inspect` checks the built backend options/definitions,
 known code-mapping/protection symbols, required defined app symbols and the
 actual Mach-O SDK/platform. Non-executable context-data `mmap` is allowed.
 These static checks do not prove runtime memory policy or device correctness.
-The bootstrap layout will report `ready=0`; do not use it to invent conventions.
+Explicit `jit_aot_prepare_layout` publishes immutable PIC/pinning conventions
+without enabling execution, accepting images or allocating executable memory.
+Startup saves the actual `ready=1` layout in `Documents/aot-layout.json`.
+`make test-apple-aot` exercises actual statically linked Mach-O faults at O0/O2.
 
 The accelerated app still requires the following work:
 
@@ -120,8 +127,8 @@ The accelerated app still requires the following work:
 3. Connect native precise-fault recovery to the app's actual Apple fault path.
    `main.c` uses the shared core with CLI gadget replay. The prepared
    `ish_app_native_fault_recover` adapter accepts only native checkpoints and is
-   not installed by any supplied scheme. Integrate it with the real app fault path;
-   fail-stop on FATAL and preserve the prior policy on UNHANDLED. Preserve the
+   installed by bootstrap startup. Verify it on physical devices as well as
+   Darwin; it fail-stops on FATAL and preserves prior policy on UNHANDLED. Preserve the
    real signal/Mach context, exact guest PC, registers, FP/SIMD state and checkpoint lifetime. Unmatched native faults must stop execution.
 4. Build a bootstrap app binary with the target ABI and exported gadget/backend
    symbols. Do not strip the symbol binary used for generation. `cli_aot` affects
@@ -159,9 +166,9 @@ Do not copy the recording header into the contract. Observe the target with its
 actual SDK and flags. Native builds expose `jit_layout_read` and
 read-only `/proc/ish/jit-layout`. It never initialises the backend or creates
 executable mappings. Accept its convention fields only with `ready=1` after
-normal target initialisation; `ready=0` is not a usable contract. If a no-image
-bootstrap cannot select conventions normally, use matching target recorder/build
-observations rather than copying recording values. A macOS observation applies
+normal target initialisation or explicit no-emitter preparation; `ready=0` is not
+a usable contract. Explicit preparation is independent of linked images and does
+not copy recording values. A macOS observation applies
 to that macOS build; collect a separate iOS contract before app linkage.
 
 `requireAppleBinary` checks the thin Mach-O ARM64 header and the declared
@@ -206,11 +213,34 @@ executing the linked app.
 If fields differ, stop. Do not supply `--abi` to relabel a recording or remove the
 runtime rejection. Build a recorder with matching Darwin/target layouts and
 retrain the exact guest modules. The current automated recording/snapshot path
-runs on Linux and uses GNU `timeout`; a Darwin recorder needs its own verified
-runner and export tools. `targeted.ts … macho` uses the recorder's symbols and
+runs on Linux; recorder command deadlines now use Bun's subprocess timeout, not
+GNU `timeout`. A Darwin recorder still needs verified export tools.
+`targeted.ts … macho` uses the recorder's symbols and
 does not perform the target checks above.
 
 ## Package the guest and sign
+
+For the bundled Apple/Bun userland (without the Linux kit's Python/zlib workload),
+train a native Darwin recorder against the exact guest files and an observed
+target contract:
+
+```sh
+bun tools/jit_aot/record-apple.ts "$DARWIN_RECORDER" "$FAKEFS" \
+  "$APPLE_SYMBOL_BINARY" "$CONTRACT" /absolute/path/to/new-apple-images
+sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/derived-data \
+  AOT_IMAGE_EXECUTION=1 AOT_IMAGES_DIR=/absolute/path/to/new-apple-images \
+  DEVELOPMENT_TEAM=YOUR_TEAM ROOT_BUNDLE_IDENTIFIER=YOUR_IDENTIFIER \
+  -allowProvisioningUpdates
+```
+
+The image directory is hash/mode sealed and its SDK contract must match the
+destination. Xcode compiles static assembly with its actual SDK, force-loads
+constructors, and retains emission-disabled backend definitions. Startup refuses
+missing/rejected images or mismatched conventions. Untrained blocks use gadgets.
+`aot-build.json` records the image manifest hash, source revision and dirty state;
+the app logs its version/build/image identity and exposes it in `/proc/ish/version`.
+Do not confuse image installation counters with sampled native-PC coverage or
+claim pi stability from the arithmetic/crypto training workload.
 
 Images serve specific guest module bytes. The stock Alpine minirootfs includes
 musl and BusyBox; the trained Python/zlib package set must also be installed for

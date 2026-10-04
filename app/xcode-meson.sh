@@ -95,7 +95,8 @@ kconfig=""
 guest_arch=${GUEST_ARCH:-arm64}
 # Reset backend, emission and CLI images together, including in reused builds.
 # Only the isolated bootstrap target may compile the native backend; it still
-# runs gadgets and does not install the app fault adapter or link images.
+# installs the native fault adapter; static images are linked separately only
+# when the checked Apple image build is explicitly requested.
 (set -x; meson configure -Djit=$jit -Djit_emit=false -Dcli_aot=) || exit $?
 for var in buildtype log b_ndebug b_sanitize log_handler kernel kconfig guest_arch; do
     old_value=$(python3 -c "import sys, json; v = next(x['value'] for x in json.load(sys.stdin) if x['name'] == '$var'); print(str(v).lower() if isinstance(v, bool) else ','.join(v) if isinstance(v, list) else v)" <<< $config)

@@ -8,6 +8,9 @@
 #include <resolv.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#if !ISH_LINUX
+#include <mach/mach.h>
+#endif
 #import <SystemConfiguration/SystemConfiguration.h>
 #import "AboutViewController.h"
 #import "AppDelegate.h"
@@ -32,6 +35,10 @@
 #include "DebugServer.h"
 #endif
 #include "kernel/native_offload.h"
+#ifdef ISH_AOT_BOOTSTRAP
+#include "asbestos/guest-arm64/jit.h"
+#include "platform/native_fault.h"
+#endif
 #ifdef ISH_FFMPEG_TEST
 extern void native_builtins_init(void);
 #endif
@@ -44,10 +51,21 @@ extern void native_builtins_init(void);
 
 @property BOOL exiting;
 @property SCNetworkReachabilityRef reachability;
+#if !ISH_LINUX
+@property (strong) dispatch_source_t memoryDiagnostics;
+#endif
 
 @end
 
 #if !ISH_LINUX
+static void logHostMemory(NSString *reason) {
+    task_vm_info_data_t info = {0};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+        NSLog(@"HOST_MEMORY: %@ footprint=%llu resident=%llu", reason,
+              (unsigned long long)info.phys_footprint, (unsigned long long)info.resident_size);
+}
+
 static void ios_handle_exit(struct task *task, int code) {
     // we are interested in init and in children of init
     // this is called with pids_lock as an implementation side effect, please do not cite as an example of good API design
@@ -84,9 +102,41 @@ static int bootError;
 #if !defined(ISH_JIT) || !defined(ISH_JIT_NO_EMIT)
 #error AOT bootstrap requires matching native/no-emitter definitions
 #endif
-    // The bootstrap has no installed native fault adapter or validated images.
-    if (setenv("ISH_JIT", "0", 1) != 0)
+    if (jit_aot_prepare_layout() != 0 || ish_app_native_fault_install() != 0)
+        return _EINVAL;
+    NSURL *identityURL = [NSBundle.mainBundle URLForResource:@"aot-build" withExtension:@"json"];
+    NSData *identityData = identityURL ? [NSData dataWithContentsOfURL:identityURL] : nil;
+    NSDictionary *identity = identityData ? [NSJSONSerialization JSONObjectWithData:identityData options:0 error:nil] : nil;
+    if (!identity || [identity[@"executionEnabled"] boolValue] != (ISH_AOT_IMAGE_EXECUTION != 0))
+        return _EINVAL;
+    NSLog(@"AOT_BUILD: version=%@ build=%@ revision=%@ images=%@ enabled=%d",
+          [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],
+          [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"],
+          identity[@"sourceRevision"], identity[@"imageManifestSha256"], ISH_AOT_IMAGE_EXECUTION);
+    if (setenv("ISH_JIT", ISH_AOT_IMAGE_EXECUTION ? "1" : "0", 1) != 0 ||
+            setenv("ISH_AOT_FAMILY", "0", 1) != 0)
         return _ENOMEM;
+#if ISH_AOT_IMAGE_EXECUTION
+    NSArray *modules = identity[@"modules"];
+    if (modules.count != 3 || jit_aot_start((unsigned)modules.count) != 0)
+        return _EINVAL;
+    struct jit_layout expected;
+    jit_layout_read(&expected);
+    NSDictionary *contract = identity[@"contract"];
+    if ([contract[@"abi"] unsignedIntValue] != expected.abi ||
+            [contract[@"prologue_words"] unsignedIntValue] != expected.prologue_words ||
+            [contract[@"entry_off"] unsignedIntValue] != expected.entry_off ||
+            [contract[@"n_pinned"] unsignedIntValue] != expected.n_pinned)
+        return _EINVAL;
+#endif
+    char layout[2048];
+    jit_layout_describe(layout, sizeof(layout));
+    NSData *layoutData = [[NSString stringWithUTF8String:layout] dataUsingEncoding:NSUTF8StringEncoding];
+    NSURL *documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    NSError *layoutError = nil;
+    if (![layoutData writeToURL:[documents URLByAppendingPathComponent:@"aot-layout.json"] options:NSDataWritingAtomic error:&layoutError])
+        NSLog(@"AOT layout evidence write failed: %@", layoutError);
+    NSLog(@"AOT target layout: %s", layout);
 #endif
     NSURL *root = [Roots.instance rootUrl:Roots.instance.defaultRoot];
 
@@ -311,11 +361,30 @@ void NetworkReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
         [UIView setAnimationsEnabled:NO];
 
 #if !ISH_LINUX
+    if (strcmp(getenv("ISH_MEMORY_DIAGNOSTICS") ?: "", "1") == 0) {
+        self.memoryDiagnostics = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+        dispatch_source_set_timer(self.memoryDiagnostics, DISPATCH_TIME_NOW,
+                2 * NSEC_PER_SEC, NSEC_PER_SEC / 4);
+        dispatch_source_set_event_handler(self.memoryDiagnostics, ^{
+            logHostMemory(@"sample");
+        });
+        dispatch_resume(self.memoryDiagnostics);
+    }
     NSString *ishVersion = [NSString stringWithFormat:@"ios-linuxkit %@ (%@)",
                          [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],
                          [NSBundle.mainBundle objectForInfoDictionaryKey:(NSString *) kCFBundleVersionKey]];
     extern const char *proc_ish_version;
     proc_ish_version = strdup(ishVersion.UTF8String);
+#ifdef ISH_AOT_BOOTSTRAP
+    NSDictionary *identity = [NSJSONSerialization JSONObjectWithData:
+        [NSData dataWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"aot-build" withExtension:@"json"]]
+        options:0 error:nil];
+    NSString *aotVersion = [ishVersion stringByAppendingFormat:@" AOT=%d images=%@ revision=%@",
+        ISH_AOT_IMAGE_EXECUTION, identity[@"imageManifestSha256"], identity[@"sourceRevision"]];
+    free((void *)proc_ish_version);
+    proc_ish_version = strdup(aotVersion.UTF8String);
+#endif
     // this defaults key is set when taking app store screenshots
     extern const char *uname_hostname_override;
     NSString *hostnameOverride = UserPreferences.shared._hostnameOverride;
@@ -370,6 +439,10 @@ void NetworkReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 }
 
 - (void)dealloc {
+#if !ISH_LINUX
+    if (self.memoryDiagnostics)
+        dispatch_source_cancel(self.memoryDiagnostics);
+#endif
     if (self.reachability != NULL) {
         SCNetworkReachabilityUnscheduleFromRunLoop(self.reachability, CFRunLoopGetMain(), kCFRunLoopCommonModes);
         CFRelease(self.reachability);
@@ -377,14 +450,23 @@ void NetworkReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 }
 
 - (void)exitApp {
+    NSLog(@"APP_SHUTDOWN: user-requested exit");
     self.exiting = YES;
     id app = [UIApplication sharedApplication];
     [app suspend];
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
-    if (self.exiting)
+    if (self.exiting) {
+        NSLog(@"APP_SHUTDOWN: exiting after background transition");
         exit(0);
+    }
+}
+
+- (void)applicationDidReceiveMemoryWarning:(UIApplication *)application {
+#if !ISH_LINUX
+    logHostMemory(@"memory warning");
+#endif
 }
 
 @end

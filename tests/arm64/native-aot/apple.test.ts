@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { appleBuildVersion, checkNoEmitter, observedContract } from '../../../tools/jit_aot/apple';
+import { appleBuildVersion, bootstrapBuildPaths, checkNoEmitter, observedContract } from '../../../tools/jit_aot/apple';
 
 function binary(platform = 2) {
   const bytes = new Uint8Array(56);
@@ -21,6 +21,23 @@ test('Apple preparation inspects actual SDK/platform commands', () => {
   expect(() => appleBuildVersion(arm64e)).toThrow('plain arm64');
   const noBuild = binary(); new DataView(noBuild.buffer).setUint32(32, 0x1b, true);
   expect(() => appleBuildVersion(noBuild)).toThrow('LC_BUILD_VERSION');
+});
+
+test('Bootstrap inspection uses actual Xcode product paths for devices and simulators', () => {
+  const settings = (platform: string) => [{ target: 'iSH-ARM64-AOT-Bootstrap', buildSettings: {
+    MESON_BUILD_DIR: `/build/Release-${platform}/meson-aot-bootstrap`,
+    TARGET_BUILD_DIR: `/build/Release-${platform}`, EXECUTABLE_PATH: 'Custom Name.app/Custom Name',
+  } }];
+  for (const platform of ['iphoneos', 'iphonesimulator']) {
+    expect(bootstrapBuildPaths(settings(platform))).toEqual({
+      buildDirectory: `/build/Release-${platform}/meson-aot-bootstrap`,
+      binary: `/build/Release-${platform}/Custom Name.app/Custom Name`,
+    });
+  }
+  expect(() => bootstrapBuildPaths([])).toThrow('bootstrap target');
+  expect(() => bootstrapBuildPaths([...settings('iphoneos'), ...settings('iphoneos')])).toThrow('ambiguous');
+  const broken = settings('iphoneos'); broken[0].buildSettings.MESON_BUILD_DIR = '$(BUILD_DIR)/meson';
+  expect(() => bootstrapBuildPaths(broken)).toThrow('unexpanded');
 });
 
 test('Native object inspection rejects code mapping but permits context data mappings', () => {
