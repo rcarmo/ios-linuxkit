@@ -19,7 +19,7 @@ Check out the release and its dependencies:
 ```sh
 git clone --recurse-submodules https://github.com/rcarmo/ios-linuxkit.git
 cd ios-linuxkit
-git checkout v2.5.0
+git checkout v2.5.1
 git submodule update --init --recursive
 ```
 
@@ -37,7 +37,7 @@ Build a signed Release app with translations disabled:
 sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/observation-build \
   DEVELOPMENT_TEAM=YOUR_TEAM ROOT_BUNDLE_IDENTIFIER=YOUR_IDENTIFIER \
   CODE_SIGN_IDENTITY='Apple Development' -allowProvisioningUpdates \
-  CURRENT_PROJECT_VERSION=822 AOT_IMAGE_EXECUTION=0
+  CURRENT_PROJECT_VERSION=824 AOT_IMAGE_EXECUTION=0
 ```
 
 Use fresh build numbers for later builds. Install and launch this app on the
@@ -73,7 +73,7 @@ after the Bun/Pi runtime fixes.
 sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/final-build \
   DEVELOPMENT_TEAM=YOUR_TEAM ROOT_BUNDLE_IDENTIFIER=YOUR_IDENTIFIER \
   CODE_SIGN_IDENTITY='Apple Development' -allowProvisioningUpdates \
-  CURRENT_PROJECT_VERSION=823 AOT_IMAGE_EXECUTION=1 \
+  CURRENT_PROJECT_VERSION=825 AOT_IMAGE_EXECUTION=1 \
   AOT_IMAGES_DIR=/absolute/path/to/new-apple-images
 ```
 

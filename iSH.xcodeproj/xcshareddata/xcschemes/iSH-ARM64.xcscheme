@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "AA0000011F96D90D00FFB7A4"
-               BuildableName = "iSH ARM64.app"
+               BuildableName = "LinuxKit.app"
                BlueprintName = "iSH-ARM64"
                ReferencedContainer = "container:iSH.xcodeproj">
             </BuildableReference>
@@ -31,7 +31,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AA0000011F96D90D00FFB7A4"
-            BuildableName = "iSH ARM64.app"
+            BuildableName = "LinuxKit.app"
             BlueprintName = "iSH-ARM64"
             ReferencedContainer = "container:iSH.xcodeproj">
          </BuildableReference>
@@ -54,7 +54,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AA0000011F96D90D00FFB7A4"
-            BuildableName = "iSH ARM64.app"
+            BuildableName = "LinuxKit.app"
             BlueprintName = "iSH-ARM64"
             ReferencedContainer = "container:iSH.xcodeproj">
          </BuildableReference>
@@ -71,7 +71,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AA0000011F96D90D00FFB7A4"
-            BuildableName = "iSH ARM64.app"
+            BuildableName = "LinuxKit.app"
             BlueprintName = "iSH-ARM64"
             ReferencedContainer = "container:iSH.xcodeproj">
          </BuildableReference>

@@ -18,7 +18,7 @@ This is a reusable runtime kit. The terminal is a reference shell; the runtime a
 
 ## Current state
 
-The current source version is **2.5.0** with Apple build number **823**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The isolated iOS AOT bootstrap can explicitly enable checked static images; reference iOS schemes remain gadget-only.
+The current source version is **2.5.1** with Apple build number **824**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The isolated iOS AOT bootstrap can explicitly enable checked static images; reference iOS schemes remain gadget-only.
 
 ## What is in the repository
 
@@ -108,12 +108,10 @@ unchanged; ordinary Meson and Xcode configurations keep the gadget engine.
 
 ## Releases and evidence
 
-[2.5.0](docs/reports/releases/IOS_LINUXKIT_2.5.0.md) adds the isolated Apple
-static-AOT/Bun bootstrap, defaults to xterm with Ghostty still available, and
-repairs terminal selection/scrolling and SIMD/fault errors affecting Bun/pi.
-The gadget defaults and Alpine 3.24.2 pin are retained. AOT code version 12
-requires fresh recordings, not relabelled older images. Physical-device pi
-stability and memory/performance acceptance remain separate from the source tag.
+[2.5.1](docs/reports/releases/IOS_LINUXKIT_2.5.1.md) fixes Pi's temporary-file
+cleanup errors when installing fd and ripgrep. xterm remains the default
+terminal, with Ghostty available as an alternative. The accelerated iPhone
+test build includes Bun 1.4.2; a reported iPhone crash remains under investigation.
 
 Earlier source releases and dated audits are indexed under
 [reports](docs/reports/README.md). Their measurements apply to the revisions,

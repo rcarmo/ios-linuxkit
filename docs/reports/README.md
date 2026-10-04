@@ -6,7 +6,7 @@ package versions and commands may be outdated. Use the
 
 | Directory | Contents |
 |---|---|
-| [releases/](releases/) | Release notes; latest: [2.5.0](releases/IOS_LINUXKIT_2.5.0.md). |
+| [releases/](releases/) | Release notes; latest: [2.5.1](releases/IOS_LINUXKIT_2.5.1.md). |
 | [audits/](audits/) | Bug investigations, code comparisons and test results. |
 | [benchmarks/](benchmarks/) | Performance measurements and workload results. |
 | [workloads/](workloads/) | Compatibility investigations for individual applications. |

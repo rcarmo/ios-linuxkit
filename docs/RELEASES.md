@@ -1,7 +1,7 @@
 # Versioning and releases
 
-The current ARM64 app version is **2.5.0**, with Apple build number **823**.
-[Release notes](reports/releases/IOS_LINUXKIT_2.5.0.md) describe the changes and
+The current ARM64 app version is **2.5.1**, with Apple build number **824**.
+[Release notes](reports/releases/IOS_LINUXKIT_2.5.1.md) describe the changes and
 known limitations.
 
 ## Version settings
@@ -55,10 +55,10 @@ Create the tag on the intended committed revision:
 
 ```sh
 git push origin master
-git tag -a v2.5.0 -m 'ios-linuxkit 2.5.0'
-git push origin v2.5.0
-git rev-list -n 1 v2.5.0
-git ls-remote origin refs/tags/v2.5.0 'refs/tags/v2.5.0^{}'
+git tag -a v2.5.1 -m 'ios-linuxkit 2.5.1'
+git push origin v2.5.1
+git rev-list -n 1 v2.5.1
+git ls-remote origin refs/tags/v2.5.1 'refs/tags/v2.5.1^{}'
 ```
 
 Replace the version in these commands for later releases. Do not move an
