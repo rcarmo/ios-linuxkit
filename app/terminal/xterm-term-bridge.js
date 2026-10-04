@@ -88,13 +88,13 @@
     applyDocumentStyle(styleState);
     await loadConfiguredFont(styleState);
 
-    let resizeTimeout = null;
+    let resizeFrame = null;
     let pendingScrollSync = false;
     let lastNativeScrollHeight;
     let lastNativeScrollTop;
+    let nativeScrollRequest = null;
     let oldProps = {};
     let xtermAppActive = null;
-    const resizeSettleDelayMs = 120;
 
     // ── Terminal setup ────────────────────────────────────────────────────────
     const term = new Terminal({
@@ -147,12 +147,14 @@
 
     // ── Resize handling ──────────────────────────────────────────────────────
     function fitTerminal() {
-        if (resizeTimeout) clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(() => {
+        if (resizeFrame !== null)
+            return;
+        resizeFrame = requestAnimationFrame(() => {
+            resizeFrame = null;
             fitAddon.fit();
             native.resize();
             scheduleScrollSync();
-        }, resizeSettleDelayMs);
+        });
     }
 
     const ro = new ResizeObserver(() => fitTerminal());
@@ -191,8 +193,15 @@
         newScrollTop(top) {
             if (!Number.isFinite(top))
                 return;
-            const cellHeight = getCellSize().height || 1;
-            term.scrollToLine(Math.round(top / cellHeight));
+            const cellHeight = getCellSize().height;
+            if (!cellHeight)
+                return;
+            const buffer = term.buffer.active;
+            const line = Math.max(0, Math.min(buffer.baseY, Math.round(top / cellHeight)));
+            // UIKit owns fractional offsets and momentum. Do not snap its
+            // offset back to the rounded row when acknowledging this request.
+            nativeScrollRequest = {buffer, line, cellHeight};
+            term.scrollToLine(line);
             scheduleScrollSync();
         },
         async updateStyle(newStyle) {
@@ -330,17 +339,23 @@
         if (!cellHeight)
             return;
         const buffer = term.buffer.active;
-        const scrollHeight = (buffer.baseY + term.rows) * cellHeight;
+        // Fit rounds rows down; the unused fraction still belongs to UIKit's
+        // viewport. Its maximum offset must equal baseY * cellHeight exactly.
+        const scrollHeight = buffer.baseY * cellHeight + terminalElement.clientHeight;
         const scrollTop = buffer.viewportY * cellHeight;
 
         if (scrollHeight !== lastNativeScrollHeight) {
             native.newScrollHeight(scrollHeight);
             lastNativeScrollHeight = scrollHeight;
         }
-        if (scrollTop !== lastNativeScrollTop) {
+        const acknowledgesNativeScroll = nativeScrollRequest?.buffer === buffer &&
+            nativeScrollRequest.line === buffer.viewportY &&
+            nativeScrollRequest.cellHeight === cellHeight;
+        nativeScrollRequest = null;
+        if (!acknowledgesNativeScroll && scrollTop !== lastNativeScrollTop) {
             native.newScrollTop(scrollTop);
-            lastNativeScrollTop = scrollTop;
         }
+        lastNativeScrollTop = scrollTop;
     }
 
     function syncApplicationCursor() {

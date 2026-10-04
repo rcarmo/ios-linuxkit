@@ -38,6 +38,7 @@ struct rowcol {
 @property (nonatomic) NSMutableArray<UIKeyCommand *> *keyCommands;
 @property ScrollbarView *scrollbarView;
 @property (nonatomic) BOOL terminalFocused;
+@property (nonatomic) BOOL updatingTerminalScroll;
 
 @property (nullable) NSString *markedText;
 @property (nullable) NSString *selectedText;
@@ -64,6 +65,8 @@ struct rowcol {
     scrollbarView.delegate = self;
     scrollbarView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     scrollbarView.bounces = NO;
+    scrollbarView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    self.clipsToBounds = YES;
     [self addSubview:scrollbarView];
 
     UserPreferences *prefs = UserPreferences.shared;
@@ -299,14 +302,21 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
         CGFloat newHeight = [message.body doubleValue];
         if (!isfinite(newHeight) || newHeight < 0)
             return;
+        self.updatingTerminalScroll = YES;
         self.scrollbarView.contentSize = CGSizeMake(0, newHeight);
+        self.updatingTerminalScroll = NO;
     } else if ([message.name isEqualToString:@"newScrollTop"]) {
         if (![message.body isKindOfClass:NSNumber.class])
             return;
         CGFloat newOffset = [message.body doubleValue];
-        if (!isfinite(newOffset) || newOffset < 0 || self.scrollbarView.contentOffset.y == newOffset)
+        if (!isfinite(newOffset) || newOffset < 0)
             return;
+        newOffset = MIN(newOffset, MAX(0, self.scrollbarView.contentSize.height - self.scrollbarView.bounds.size.height));
+        if (self.scrollbarView.contentOffset.y == newOffset)
+            return;
+        self.updatingTerminalScroll = YES;
         [self.scrollbarView setContentOffset:CGPointMake(0, newOffset) animated:NO];
+        self.updatingTerminalScroll = NO;
     } else if ([message.name isEqualToString:@"openLink"]) {
         if ([message.body isKindOfClass:NSString.class])
             [UIApplication openURL:message.body];
@@ -314,6 +324,9 @@ static NSString *const HANDLERS[] = {@"syncFocus", @"focus", @"newScrollHeight",
 }
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    // Terminal output updates the indicator, not the user's scroll position.
+    if (self.updatingTerminalScroll)
+        return;
     [self.terminal.webView evaluateJavaScript:[NSString stringWithFormat:@"exports.newScrollTop(%f)", scrollView.contentOffset.y] completionHandler:nil];
 }
 

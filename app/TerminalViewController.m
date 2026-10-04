@@ -57,6 +57,11 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
+    if (@available(iOS 15.0, *)) {
+        self.bottomConstraint.active = NO;
+        [self.termView.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor].active = YES;
+    }
+
 #if !ISH_LINUX
     int bootError = [AppDelegate bootError];
     if (bootError < 0) {
@@ -323,26 +328,31 @@
         return;
 
     CGRect screenKeyboardFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-    UIScreen *screen = UIScreen.mainScreen;
+    UIScreen *screen = self.view.window.screen ?: UIScreen.mainScreen;
     // notification.object is nil before iOS 16.1 and the correct UIScreen after iOS 16.1
-    if (notification.object != nil)
+    if ([notification.object isKindOfClass:UIScreen.class])
         screen = notification.object;
     CGRect keyboardFrame = [self.view convertRect:screenKeyboardFrame fromCoordinateSpace:screen.coordinateSpace];
     if (CGRectEqualToRect(keyboardFrame, CGRectZero))
         return;
     CGRect intersection = CGRectIntersection(keyboardFrame, self.view.bounds);
-    keyboardFrame = intersection;
-    NSLog(@"%@ %@", notification.name, @(keyboardFrame));
-    self.hasExternalKeyboard = keyboardFrame.size.height < 100;
-    CGFloat pad = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(keyboardFrame);
+    BOOL intersects = !CGRectIsNull(intersection) && !CGRectIsEmpty(intersection);
+    self.hasExternalKeyboard = !intersects || intersection.size.height < 100;
+    if (@available(iOS 15.0, *))
+        return; // UIKit's layout guide handles keyboard movement and safe areas.
+
+    keyboardFrame = intersects ? intersection : CGRectZero;
+    CGFloat pad = self.view.safeAreaInsets.bottom;
     // The keyboard appears to be undocked. This means it can either be split or
     // truly floating. In the former case we want to keep the pad, but in the
     // latter we should fall back to the input accessory view instead of the
     // keyboard.
-    if (pad != keyboardFrame.size.height && keyboardFrame.size.width != UIScreen.mainScreen.bounds.size.width) {
+    if (intersects) {
+        pad = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(keyboardFrame);
+    }
+    if (intersects && pad != keyboardFrame.size.height && keyboardFrame.size.width != self.view.bounds.size.width) {
         pad = MAX(self.view.safeAreaInsets.bottom, self.termView.inputAccessoryView.frame.size.height);
     }
-    // NSLog(@"pad %f", pad);
     self.bottomConstraint.constant = pad;
 
     BOOL initialLayout = self.termView.needsUpdateConstraints;

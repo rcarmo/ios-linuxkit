@@ -52,6 +52,17 @@
     self.contentViewOrigin = contentView.frame.origin;
 }
 
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    // The terminal renders its own scrollback. Keep its web view at the
+    // visible viewport size, including while the keyboard resizes this view.
+    self.contentView.frame = (CGRect) {
+        .origin = CGPointMake(self.contentOffset.x + self.contentViewOrigin.x,
+                              self.contentOffset.y + self.contentViewOrigin.y),
+        .size = self.bounds.size,
+    };
+}
+
 - (id<UIScrollViewDelegate>)delegate {
     return self.outerDelegate.innerDelegate;
 }
