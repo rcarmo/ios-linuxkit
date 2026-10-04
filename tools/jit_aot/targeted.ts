@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/** Record four version-aware Alpine targets. No installs, ignored failures or background jobs.
+/** Record baseline Alpine targets and optional Bun. No installs or ignored failures.
  * Usage: bun tools/jit_aot/targeted.ts ISH FAKEFS OUTPUT [elf|macho]
  * OUTPUT must not exist; the completed manifest is the publication marker.
  */
@@ -42,6 +42,16 @@ requireOK(py, 'Python canonical path');
 const paths = discover.stdout.split('\n').filter(s => s.startsWith('/'));
 if (paths.length !== 3 || !py.stdout.trim().startsWith('/usr/lib/')) throw new Error('invalid module inventory');
 const modules = { musl: paths[0], busybox: paths[1], python: py.stdout.trim(), zlib: paths[2] };
+const includeBun = process.env.AOT_INCLUDE_BUN === '1';
+let bunInventory = '';
+if (includeBun) {
+    const bun = run([ish, '-f', root, '/usr/local/bin/bun', '--version'], { ISH_JIT: '0' });
+    await Bun.write(join(out, 'bun-inventory.log'), bun.stdout + bun.stderr);
+    requireOK(bun, 'Bun inventory');
+    if (bun.stdout.trim() !== '1.4.2') throw new Error('Bun training requires exact version 1.4.2');
+    Object.assign(modules, { bun: '/usr/local/bin/bun' });
+    bunInventory = bun.stdout;
+}
 for (const module of Object.values(modules)) {
     if (!await Bun.file(join(root, 'data', module)).exists()) throw new Error(`missing module: ${module}`);
 }
@@ -49,6 +59,7 @@ const workload = `set -eu
 i=0; while [ "$i" -lt 1000 ]; do i=$((i+1)); done
 test "$i" = 1000
 python3 -c 'import zlib,json; a=bytes(range(256))*4096; b=zlib.compress(a); assert zlib.decompress(b)==a; assert sum(range(10000))==49995000; print(json.dumps([len(a),len(b)]))'
+${includeBun ? `/usr/local/bin/bun -e 'let sum=0; for(let i=0;i<10000;i++)sum+=i; if(sum!==49995000)throw Error("sum"); const value=JSON.parse(JSON.stringify({sum})); if(value.sum!==sum)throw Error("json"); console.log("BUN_TRAIN_OK")'\n` : ''}
 printf 'AOT_TRAIN_OK\\n'
 `;
 await Bun.write(join(out, 'workload.sh'), workload);
@@ -82,7 +93,7 @@ for (const [name, module] of Object.entries(modules)) {
 }
 await Bun.write(join(out, 'manifest.json'), JSON.stringify({
     format, abi: abi!.toString(16).padStart(8, '0'), ish, ishSha256: await sha(ish), root,
-    inventory: discover.stdout, workloadSha256: await sha(join(out, 'workload.sh')), images,
+    inventory: discover.stdout + bunInventory, workloadSha256: await sha(join(out, 'workload.sh')), images,
     limits: 'Host recording only. No iOS signing/device validation. No family matching.',
 }, null, 2) + '\n');
 console.log(`complete: ${join(out, 'manifest.json')}`);

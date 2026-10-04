@@ -1543,7 +1543,7 @@
 				AA000300AF96D90D00FFB7A4 /* Build Meson (ARM64) */,
 				AA0000081F96D90D00FFB7A4 /* Sources */,
 				AA0000091F96D90D00FFB7A4 /* Frameworks */,
-				AA000011AF96D90D00FFB7A4 /* Download Root */,
+				A07000000000000000000007 /* Download AOT Root */,
 				AA000012AF96D90D00FFB7A4 /* Generate APK Repositories File */,
 				AA000013AF96D90D00FFB7A4 /* Compile JavaScript */,
 				AA000010AF96D90D00FFB7A4 /* Resources */,
@@ -2106,6 +2106,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A07000000000000000000007 /* Download AOT Root */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = (
+				"$(SRCROOT)/app/download-root.sh",
+				"$(SRCROOT)/app/download-aot-root.sh",
+				"$(SRCROOT)/app/GuestARM64.xcconfig",
+				"$(SRCROOT)/scripts/package-bun-rootfs.py",
+			);
+			name = "Download AOT Root";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/root.tar.gz",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "sh \"$SRCROOT/app/download-aot-root.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 		AA000011AF96D90D00FFB7A4 /* Download Root */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;

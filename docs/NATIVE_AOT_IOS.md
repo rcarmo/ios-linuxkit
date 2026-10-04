@@ -71,6 +71,22 @@ For a signed bootstrap, replace `CODE_SIGNING_ALLOWED=NO` with the configured
 `DEVELOPMENT_TEAM`, `ROOT_BUNDLE_IDENTIFIER` and `-allowProvisioningUpdates`.
 Its `.aot-bootstrap` bundle/app-group suffix keeps its filesystem separate from
 the reference app. The script uses iOS 15 as the minimum for Xcode 27.
+Set `IOS_DESTINATION='id=DEVICE_UDID'` to provision for a connected device.
+
+The bootstrap rootfs adds Bun 1.4.2 for Linux AArch64 musl to a fresh Alpine
+3.24.2 archive. Alpine, Bun and the required libgcc/libstdc++ payloads are
+SHA-256 pinned. Packaging preserves base ownership, modes and links and
+publishes atomically. The runtime library payloads are not registered as APK
+packages; provenance is stored in `/usr/share/linuxkit/bun.json`. Reference
+schemes still use the unmodified Alpine rootfs. Existing bootstrap userlands
+are not overwritten; import the new bundled filesystem to get Bun.
+
+Run `make test-bun-rootfs` for archive-preservation and failure tests.
+`BUN_ARCHIVE_PATH` can supply a previously downloaded, checksum-verified Bun
+zip to Xcode. `AOT_INCLUDE_BUN=1 make record-arm64-aot` records Bun as an
+optional fifth module after checking its version and running arithmetic/JSON.
+The guest must already contain the baseline Python/zlib package set. This
+does not yet prove Bun native-image execution on Apple devices.
 
 The guarded bridge allows `jit=true` only for this target, plain ARM64,
 matching `GUEST_ARM64`, `ISH_JIT`, `ISH_JIT_NO_EMIT`, `ISH_AOT_BOOTSTRAP`

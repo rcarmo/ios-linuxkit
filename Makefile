@@ -64,9 +64,12 @@ check-docs-style:
 test-docs-style:
 	bun test scripts/check-docs-style.test.ts
 
-.PHONY: test-rootfs-download
+.PHONY: test-rootfs-download test-bun-rootfs
 test-rootfs-download:
 	sh tests/arm64/rootfs/download-root.sh
+
+test-bun-rootfs:
+	python3 tests/arm64/rootfs/package_bun_test.py
 
 .PHONY: build-arm64-linux
 build-arm64-linux:

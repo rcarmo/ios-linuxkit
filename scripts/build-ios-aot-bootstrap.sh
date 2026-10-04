@@ -11,7 +11,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(dirname "$script_dir")
 
 xcodebuild -project "$repo_dir/iSH.xcodeproj" -scheme iSH-ARM64-AOT-Bootstrap \
-    -configuration Release -destination 'generic/platform=iOS' \
+    -configuration Release -destination "${IOS_DESTINATION:-generic/platform=iOS}" \
     -derivedDataPath "$derived_data" IPHONEOS_DEPLOYMENT_TARGET=15.0 "$@" build
 
 bun "$repo_dir/tools/jit_aot/apple.ts" inspect \

@@ -2,8 +2,14 @@ import {test,expect} from 'bun:test';
 import {mkdtempSync,mkdirSync,rmSync,symlinkSync,chmodSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {cleanEnv,safePath,seal,verify,checked,matchContract,definedSymbols,requireAppleBinary,extractModules,sha,publish} from '../../../tools/jit_aot/kit';
+import {cleanEnv,safePath,seal,verify,checked,matchContract,definedSymbols,requireAppleBinary,extractModules,sha,publish,moduleNames,names} from '../../../tools/jit_aot/kit';
 const root=mkdtempSync(join(tmpdir(),'ish-kit-test-'));process.on('exit',()=>rmSync(root,{recursive:true,force:true}));
+test('recording kits retain baseline compatibility and accept only optional Bun',()=>{
+ const baseline=names.map(name=>({name}));
+ expect(moduleNames(baseline)).toEqual(names);
+ expect(moduleNames([...baseline,{name:'bun'}])).toEqual([...names,'bun']);
+ for(const modules of [baseline.slice(1),[...baseline,{name:'bun'},{name:'bun'}],[...baseline,{name:'unknown'}]])expect(()=>moduleNames(modules)).toThrow();
+});
 test('backend overrides removed without altering parent',()=>{process.env.ISH_JIT_RECORD='/bad';process.env.ISH_AOT_FAMILY='1';const e=cleanEnv({ISH_JIT:'0'});expect(e.ISH_JIT_RECORD).toBeUndefined();expect(e.ISH_AOT_FAMILY).toBeUndefined();expect(e.ISH_JIT).toBe('0');expect(process.env.ISH_JIT_RECORD).toBe('/bad');delete process.env.ISH_JIT_RECORD;delete process.env.ISH_AOT_FAMILY;});
 test('paths cannot escape payload',()=>{for(const p of ['../x','/x','a/../b','a\\b','a//b','./a'])expect(()=>safePath(root,p)).toThrow();expect(safePath(root,'bin/ish')).toBe(join(root,'bin/ish'));});
 test('atomic seal, hash/size/mode checks, no overwrite',async()=>{const s=join(root,'stage'),o=join(root,'sealed');mkdirSync(s);await Bun.write(join(s,'x'),'hi');await seal(s,o,{kind:'test'});expect((await verify(o)).kind).toBe('test');await Bun.write(join(o,'x'),'no');await expect(verify(o)).rejects.toThrow('mismatch');await Bun.write(join(o,'x'),'hi');chmodSync(join(o,'x'),0o700);await expect(verify(o)).rejects.toThrow('mismatch');});

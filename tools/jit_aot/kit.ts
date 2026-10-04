@@ -11,6 +11,13 @@ import { createInterface } from 'node:readline';
 
 export const project = resolve(import.meta.dir, '../..');
 export const names = ['musl','busybox','python','zlib'];
+export function moduleNames(modules: { name: string }[]) {
+ if(!Array.isArray(modules))throw Error('missing module set');
+ const selected=modules.map(module=>module.name);
+ if(!Array.isArray(selected)||new Set(selected).size!==selected.length||names.some(name=>!selected.includes(name))||selected.some(name=>![...names,'bun'].includes(name)))
+  throw Error('need the four baseline modules and optionally Bun; unknown/duplicate/incomplete module set');
+ return [...names,...(selected.includes('bun')?['bun']:[])];
+}
 export function cleanEnv(extra: Record<string,string> = {}) {
  return {...Object.fromEntries(Object.entries(process.env).filter(([k,v])=>v!==undefined && !/^(ISH_JIT|ISH_AOT)/.test(k))) as Record<string,string>, ...extra};
 }
@@ -55,7 +62,8 @@ async function sourceInfo(out:string) {
 }
 async function checkRecordings(dir:string, root:string) {
  const m=JSON.parse(readFileSync(join(dir,'manifest.json'),'utf8'));
- if(m.format!=='elf'||m.images?.length!==4||m.images.map((i:any)=>i.name).sort().join()!==[...names].sort().join())throw Error('need four completed targeted ELF recordings');
+ if(m.format!=='elf')throw Error('need completed targeted ELF recordings');
+ moduleNames(m.images);
  for(const i of m.images) {
   if(!/^\/[A-Za-z0-9/_.-]+$/.test(i.module)||i.module.split('/').includes('..'))throw Error('unsafe module');
   for(const [p,h] of [[join(dir,i.name+'.jsonl'),i.recordingSha256],[join(root,'data',i.module),i.sha256],[join(dir,`aot_${i.name}.S`),i.imageSha256]])if(await sha(p)!==h)throw Error(`recording identity mismatch: ${p}`);
@@ -122,7 +130,7 @@ async function generate(seed:string,out:string,format:string,symbolBinary?:strin
  const c=contractFile?JSON.parse(readFileSync(contractFile,'utf8')):null;
  if(format==='macho')requireAppleBinary(readFileSync(target).subarray(0,32),c.platform);
  const checks=[];
- for(const name of names){
+ for(const name of moduleNames(m.modules)){
   const rec=join(seed,'recordings',name+'.jsonl');let header:any;const required=new Set<string>(['ish_aot_register']);
   for await(const line of createInterface({input:createReadStream(rec),crlfDelay:Infinity})) {const t=JSON.parse(line);if(t.header){header=t.header;continue;}for(const n of Object.values(t.keysym||{}))required.add(n as string);for(const seg of t.segs)for(const rel of seg.rel)if(rel[1]!=='exit')required.add(rel[2]);}
   if(c)matchContract(header,c,await sha(target));
@@ -137,7 +145,9 @@ async function generate(seed:string,out:string,format:string,symbolBinary?:strin
 async function build(seed:string,images:string,out:string) {
  const sm=await verify(seed),im=await verify(images);if(sm.kind!=='seed'||im.kind!=='generated'||im.format!=='elf'||im.seedManifestSha256!==await sha(join(seed,'manifest.json')))throw Error('build input identity mismatch');
  const s=stageFor(out);const provenance=await sourceInfo(s);mkdirSync(join(s,'bin'));
- const imageArg=names.map(n=>join(images,`aot_${n}.S`)).join(',');
+ const selected=moduleNames(sm.modules);
+ if(moduleNames(im.checks).join()!==selected.join())throw Error('generated image module set mismatch');
+ const imageArg=selected.map(n=>join(images,`aot_${n}.S`)).join(',');
  for(const kind of ['gadget','release','debug']) {
   const d=join(s,'build-'+kind);const config=kind==='debug'?'debug':'release';
   checked(['meson','setup',d,'--buildtype='+config,'-Djit='+(kind==='gadget'?'false':'true'),...(kind==='gadget'?[]:['-Djit_emit=false','-Dcli_aot='+imageArg])],join(s,kind+'-setup.log'),{env:{CC:'clang'}});
