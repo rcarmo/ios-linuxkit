@@ -716,13 +716,15 @@ static __uint128_t pmull64_full(uint64_t a, uint64_t b) {
 void pmull_helper(uint8_t *rd, uint8_t *rn, uint8_t *rm, uint32_t Q, uint32_t size) {
     if (size == 0) {
         // 8-bit polynomial multiply: 8 pairs of bytes -> 8 halfwords
+        // Vd may alias either input; widening stores overwrite unread bytes.
+        uint8_t source_n[8], source_m[8];
+        memcpy(source_n, rn + (Q ? 8 : 0), sizeof(source_n));
+        memcpy(source_m, rm + (Q ? 8 : 0), sizeof(source_m));
         uint16_t *dst = (uint16_t *)rd;
-        uint8_t *src_n = Q ? &rn[8] : rn;
-        uint8_t *src_m = Q ? &rm[8] : rm;
 
         for (int i = 0; i < 8; i++) {
-            uint16_t a = src_n[i];
-            uint16_t b = src_m[i];
+            uint16_t a = source_n[i];
+            uint16_t b = source_m[i];
             uint16_t result = 0;
             for (int j = 0; j < 8; j++) {
                 if (b & (1 << j)) {
