@@ -82,7 +82,7 @@ printf '#!/missing-interpreter\n' > "$TMP/offload-root/bin/ffmpeg"
 chmod 755 "$TMP/offload-root/bin/ffmpeg"
 check "$TMP/offload-exec.log" 'offload-exec-shebang-ok' "$TMP/offload-exec" "$TMP/offload-root"
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
-    "$HERE/exit-current.c" -Wl,--wrap=pthread_exit "${libs[@]}" -o "$TMP/exit-current"
+    "$HERE/exit-current.c" "${libs[@]}" -o "$TMP/exit-current"
 check "$TMP/exit-current.log" 'exit-current-ok' "$TMP/exit-current"
 check "$TMP/task-start.log" 'task-start-rollback-ok' "$TMP/task-start"
 check "$TMP/jit-oom.log" 'jit-oom-guest-kill-dispatch-ok' "$TMP/jit-oom"

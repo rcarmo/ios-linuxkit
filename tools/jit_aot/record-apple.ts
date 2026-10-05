@@ -47,7 +47,7 @@ for (const module of order) {
     console.log(`Recording ${module.name}`);
     const stdout = checked([recorder, '-f', root, '/usr/bin/env',
         'BUN_JSC_useJIT=0', 'BUN_RUNTIME_TRANSPILER_CACHE_PATH=0',
-        ...(go ? [`GO_AOT_CACHE=${goCache}`] : []),
+        ...(go ? [`GO_AOT_CACHE=${goCache}`, `GO_AOT_VET_FIRST=${module.name === 'go_vet' ? '1' : '0'}`] : []),
         '/bin/sh', ...(go ? ['/mnt/go-aot/build.sh'] : ['-ec', workload])], join(stage, module.name + '-record.log'), {
         env: { ISH_JIT: '1', ISH_JIT_PIC: '1', ISH_JIT_STATS: '1',
             ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: module.path, ISH_JIT_RECORD_MOD_EXACT: '1', ISH_AOT_FAMILY: '0',

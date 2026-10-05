@@ -10,14 +10,20 @@ export GOMAXPROCS=2 GODEBUG=asyncpreemptoff=1
 export GOCACHE=${GO_AOT_CACHE:-$work/cache}
 export GOFLAGS=-p=1
 test "$(go version)" = 'go version go1.26.8 linux/arm64'
-cp "$fixture/main.go" "$fixture/probe.go" "$fixture/probe.s" "$work/"
+cp "$fixture/main.go" "$fixture/probe.go" "$fixture/probe.s" "$fixture/probe.cfg" "$work/"
 cd "$work"
+# Give vet its own recording space before the other tools fill the code arena.
+if [ "${GO_AOT_VET_FIRST:-0}" = 1 ]; then
+    /usr/lib/go/pkg/tool/linux_arm64/vet probe.cfg
+fi
 gofmt -w main.go probe.go
 go tool compile -p probe -o probe.a probe.go
 go tool asm -p probe -o probe.o probe.s
 go build -o hello main.go
 test "$(./hello)" = 'GO_AOT_RUN_OK 45'
 go vet main.go
+# Exercise the analyzer itself even when go vet reuses a cached result.
+go tool vet probe.cfg
 printf 'package invalid\nfunc broken(\n' > invalid.go
 if go tool compile -o invalid.a invalid.go > invalid.log 2>&1; then
     echo 'Go compiler accepted invalid source' >&2

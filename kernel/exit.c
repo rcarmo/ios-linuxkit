@@ -65,10 +65,16 @@ noreturn void do_exit(int status) {
     // If this thread was already marked as leaked by the safety valve,
     // the group leader has finished exiting and the group struct may be
     // freed. Don't touch any shared state — just kill the host thread.
+    lock(&pids_lock);
     if (current->exiting) {
+        unlock(&pids_lock);
         current = NULL;
         pthread_exit(NULL);
     }
+    // Claim cleanup before slow reporting/teardown. The group-exit safety
+    // valve must not unlink a thread that is already releasing its resources.
+    current->exiting = true;
+    unlock(&pids_lock);
 
 #ifdef ISH_JIT
     // Before mm teardown: recordings need live module/context metadata. Only
@@ -138,7 +144,6 @@ noreturn void do_exit(int status) {
 
     // the actual freeing needs pids_lock
     lock(&pids_lock);
-    current->exiting = true;
     // release the sighand (may already be NULL if another thread in the group
     // exited concurrently and released it, e.g. after safety-valve SIGUSR1)
     if (current->sighand != NULL) {

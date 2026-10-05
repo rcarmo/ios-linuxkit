@@ -6,12 +6,25 @@
 #include "kernel/init.h"
 #include "kernel/calls.h"
 #include "kernel/resource.h"
+#include "kernel/mm.h"
 #include "fs/real.h"
 
-extern _Noreturn void __real_pthread_exit(void *);
-_Noreturn void __wrap_pthread_exit(void *value) {
+static _Noreturn void checked_pthread_exit(void *);
+static void checked_mm_release(struct mm *);
+// Exercise the real exit implementation with portable teardown checkpoints.
+#define pthread_exit checked_pthread_exit
+#define mm_release checked_mm_release
+#include "kernel/exit.c"
+#undef mm_release
+#undef pthread_exit
+
+static _Noreturn void checked_pthread_exit(void *value) {
     assert(current == NULL); // deterministic baseline failure, no racing free needed
-    __real_pthread_exit(value);
+    pthread_exit(value);
+}
+static void checked_mm_release(struct mm *mm) {
+    assert(current != NULL && current->exiting);
+    mm_release(mm);
 }
 extern int do_wait(int type, pid_t_ id, struct siginfo_ *, struct rusage_ *, int options);
 static void *child_exit(void *arg) {
@@ -31,5 +44,5 @@ int main(void) {
         assert(do_wait(1,pid,&info,&usage,4)==0); // P_PID, WEXITED
         assert(info.child.pid==pid&&info.child.status==0);
     }
-    puts("exit-current-ok: 100 normal leader exits clear TLS before pthread cleanup and reap");
+    puts("exit-current-ok: 100 leader exits claim teardown before mm release and clear TLS before reap");
 }

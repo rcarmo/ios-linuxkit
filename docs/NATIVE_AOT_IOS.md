@@ -106,7 +106,8 @@ its checksum, package identity, architecture and executable files are checked.
 The complete Go package payload, including standard-library sources, is bundled
 under `/usr/lib/go`. This does not register Go or its C-toolchain dependencies
 in the installed APK database. Pure-Go builds use `CGO_ENABLED=0` and
-`GOTOOLCHAIN=local`. Install Alpine's `gcc`, `binutils` and `musl-dev` to use CGo.
+`GOTOOLCHAIN=local`. To use CGo, install Alpine's `gcc`, `binutils` and
+`musl-dev` and set `CGO_ENABLED=1`.
 Run `make test-go-rootfs` to check Go packaging.
 
 ## Check Go compilation
