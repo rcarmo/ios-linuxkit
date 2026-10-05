@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const recorder = process.env.GO_AOT_RECORDER, root = process.env.ROOTFS;
-test.skipIf(!recorder || !root).each([false, true])('exact Go recording excludes gofmt (target-only=%s)', targetOnly => {
+test.skipIf(!recorder || !root).each([
+    { targetOnly: false }, { targetOnly: true },
+    { targetOnly: true, shard: '0' }, { targetOnly: true, shard: '1' },
+])('exact Go recording preserves target-only/shard isolation: %j', ({ targetOnly, shard }) => {
     const stage = mkdtempSync(join(tmpdir(), 'go-aot-exact-'));
     try {
         const record = join(stage, 'go.jsonl');
@@ -14,6 +17,7 @@ test.skipIf(!recorder || !root).each([false, true])('exact Go recording excludes
                 ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: '/usr/lib/go/bin/go',
                 ISH_JIT_RECORD_MOD_EXACT: '1', ISH_AOT_FAMILY: '0',
                 ISH_JIT_RECORD_TARGET_ONLY: targetOnly ? '1' : '0',
+                ...(shard ? { ISH_JIT_RECORD_SHARDS: '2', ISH_JIT_RECORD_SHARD: shard } : {}),
                 ISH_JIT_MAP: join(stage, 'map.txt') },
             timeout: 300000,
         });
@@ -24,6 +28,7 @@ test.skipIf(!recorder || !root).each([false, true])('exact Go recording excludes
         expect(rows.shift()?.header?.region_exhausted).toBe(false);
         expect(rows.length).toBeGreaterThan(0);
         expect([...new Set(rows.map(row => row.mod))]).toEqual(['/usr/lib/go/bin/go']);
+        if (shard) expect(rows.every(row => Math.floor(row.off / 4096) % 2 === Number(shard))).toBe(true);
         const modules = readFileSync(join(stage, 'map.txt'), 'utf8').split('\n')
             .filter(line => line.startsWith('M ')).map(line => line.split(' '));
         const go = modules.find(row => row[6] === '/usr/lib/go/bin/go');

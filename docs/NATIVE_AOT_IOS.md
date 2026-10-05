@@ -79,8 +79,8 @@ sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/final-build \
 ```
 
 The build script checks that runtime code generation is disabled and that all
-nine translation sets are linked: musl, BusyBox, Bun, Go, gofmt and Go's
-compiler, assembler, linker and vet tool. Older Bun-only image bundles remain
+ten translation sets are linked, covering musl, BusyBox, Bun, Go, gofmt and Go's
+compiler, assembler, linker and vet tool. Older Bun-only and nine-image bundles remain
 supported. Sign the app normally; no JIT entitlement
 or downloaded executable code is required.
 

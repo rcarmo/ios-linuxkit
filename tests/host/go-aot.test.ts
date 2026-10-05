@@ -21,6 +21,6 @@ test.skipIf(!ish || !root)('bundled Go formats, compiles, assembles, links and v
     if (process.env.GO_AOT_NO_EMIT === '1') {
         expect(output).toContain('JIT(AOT-only, no runtime emission)');
         expect(output).toContain('segments 0, units 0, code 0 KB');
-        expect(output).toMatch(/AOT [1-9][0-9]* \(9 images\)/);
+        expect(output).toMatch(/AOT [1-9][0-9]* \((9|10) images\)/);
     }
 }, 3660000);

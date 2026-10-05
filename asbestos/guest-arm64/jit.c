@@ -2173,6 +2173,7 @@ static void reg_install(struct fiber_block *b, struct jit_ctx *ctx, const struct
 // ISH_JIT_RECORD_MOD_EXACT=1 selects only that exact path (e.g. go, not gofmt).
 static const char *rec_file, *rec_mod;
 static bool rec_mod_exact, rec_target_only;
+static unsigned rec_shards = 1, rec_shard;
 static bool module_path_has(int mod, const char *sub);
 static bool rec_module(int mod) {
     return rec_file && module_path_has(mod, rec_mod);
@@ -2722,6 +2723,8 @@ static void jit_translate(struct fiber_block *b, const struct jit_units *U, stru
         return;
     // Keep unrelated workload tools from consuming a recording's bounded arena.
     if (rec_target_only && !rec_module(mod))
+        return;
+    if (rec_target_only && (off >> PAGE_BITS) % rec_shards != rec_shard)
         return;
     // This process's own translations need a context with room for CTX_MAX
     // indices (8MB of address space, per module mapping of every guest
@@ -3436,6 +3439,17 @@ static void jit_init(void) {
     rec_mod_exact = getenv("ISH_JIT_RECORD_MOD_EXACT") && strcmp(getenv("ISH_JIT_RECORD_MOD_EXACT"), "1") == 0;
     rec_target_only = rec_file && getenv("ISH_JIT_RECORD_TARGET_ONLY") &&
         strcmp(getenv("ISH_JIT_RECORD_TARGET_ONLY"), "1") == 0;
+    if (rec_target_only && (getenv("ISH_JIT_RECORD_SHARDS") || getenv("ISH_JIT_RECORD_SHARD"))) {
+        const char *count = getenv("ISH_JIT_RECORD_SHARDS");
+        const char *part = getenv("ISH_JIT_RECORD_SHARD");
+        // Keep invalid recording requests from silently producing the wrong part.
+        if (!count || strcmp(count, "2") || !part || (strcmp(part, "0") && strcmp(part, "1"))) {
+            fprintf(stderr, "invalid recording shard: require SHARDS=2 and SHARD=0 or 1\n");
+            return;
+        }
+        rec_shards = 2;
+        rec_shard = part[0] - '0';
+    }
     if (have_region) {
         make_exit_stub();
         jit_exec_ready();

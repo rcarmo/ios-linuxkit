@@ -118,7 +118,7 @@ static int bootError;
         return _ENOMEM;
 #if ISH_AOT_IMAGE_EXECUTION
     NSArray *modules = identity[@"modules"];
-    if ((modules.count != 3 && modules.count != 9) || jit_aot_start((unsigned)modules.count) != 0)
+    if ((modules.count != 3 && modules.count != 9 && modules.count != 10) || jit_aot_start((unsigned)modules.count) != 0)
         return _EINVAL;
     struct jit_layout expected;
     jit_layout_read(&expected);

@@ -10,12 +10,15 @@ export const appleGoModules = [
         name: `go_${name}`, path: `/usr/lib/go/pkg/tool/linux_arm64/${name}`,
     })),
 ];
-export const appleModules = [...appleBaseModules, ...appleGoModules];
+export const appleLegacyGoModules = [...appleBaseModules, ...appleGoModules];
+export const appleModules = appleLegacyGoModules.flatMap(module => module.name === 'go_compile'
+    ? [module, { ...module, name: 'go_compile_1' }] : [module]);
 
 export function validateAppleModules(modules: unknown) {
     if (!Array.isArray(modules)) throw Error('missing Apple module set');
     // Retain compatibility with previously recorded Bun-only bundles.
-    const expected = modules.length === appleBaseModules.length ? appleBaseModules : appleModules;
+    const expected = modules.length === appleBaseModules.length ? appleBaseModules :
+        modules.length === appleLegacyGoModules.length ? appleLegacyGoModules : appleModules;
     if (modules.length !== expected.length || modules.some((module, i) =>
         module?.name !== expected[i].name || module?.path !== expected[i].path ||
         !Number.isSafeInteger(module?.translations) || module.translations <= 0 ||

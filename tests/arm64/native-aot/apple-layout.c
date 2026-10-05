@@ -2,7 +2,24 @@
 #include "asbestos/guest-arm64/jit.c"
 #include <assert.h>
 
+static void arena_capacity_probe(void) {
+    assert(!region_alloc(16) && !atomic_load(&region_exhausted));
+    region = mmap(NULL, REGION_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    assert(region != MAP_FAILED);
+    assert(!region_alloc(SIZE_MAX) && !atomic_load(&region_used));
+    atomic_store(&region_used, REGION_SIZE - 16);
+    assert(!region_alloc(32) && atomic_load(&region_exhausted));
+    assert(atomic_load(&region_used) == REGION_SIZE - 16);
+    assert(region_alloc(16) == region + REGION_SIZE - 16);
+    assert(!region_alloc(1) && atomic_load(&region_used) == REGION_SIZE);
+    assert(munmap(region, REGION_SIZE) == 0);
+    region = NULL;
+    atomic_store(&region_used, 0);
+    atomic_store(&region_exhausted, false);
+}
+
 int main(void) {
+    arena_capacity_probe();
     struct jit_layout before, prepared, after;
     assert(jit_layout_read(&before) == 0 && !before.ready && !before.abi);
     assert(jit_aot_prepare_layout() == 0);

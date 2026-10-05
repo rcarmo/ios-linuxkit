@@ -33,8 +33,9 @@ cpSync(join(import.meta.dir, '../../tests/arm64/benchmarks/go-aot'), join(stage,
 await Bun.write(join(stage, 'target-contract.json'), JSON.stringify(contract, null, 2));
 // Record the cold Go build with the compiler first, then reuse only its cache.
 // Formatting, direct compile/asm, linking and vet still run on every invocation.
-const order = [...modules.slice(0, 3), modules.find(module => module.name === 'go_compile')!,
-    ...modules.slice(3).filter(module => module.name !== 'go_compile')];
+const compilerParts = modules.filter(module => module.path.endsWith('/compile'));
+const order = [...modules.slice(0, 3), ...compilerParts,
+    ...modules.slice(3).filter(module => !compilerParts.includes(module))];
 const existingGoCache = process.env.APPLE_AOT_GO_CACHE;
 if (existingGoCache && !/^\/tmp\/go-aot-record-cache-[0-9]+$/.test(existingGoCache))
     throw Error('APPLE_AOT_GO_CACHE must name a previous recording cache in this guest');
@@ -44,15 +45,17 @@ for (const module of order) {
     const guest = join(root, 'data', module.path), hash = await sha(guest);
     const record = join(stage, module.name + '.jsonl');
     const go = module.name === 'go' || module.name === 'gofmt' || module.name.startsWith('go_');
+    const compilerPart = compilerParts.indexOf(module);
     console.log(`Recording ${module.name}`);
     const stdout = checked([recorder, '-f', root, '/usr/bin/env',
         'BUN_JSC_useJIT=0', 'BUN_RUNTIME_TRANSPILER_CACHE_PATH=0',
         ...(go ? [`GO_AOT_CACHE=${goCache}`, `GO_AOT_VET_FIRST=${module.name === 'go_vet' ? '1' : '0'}`,
-            `GO_AOT_REBUILD=${module.name === 'go_compile' ? '1' : '0'}`] : []),
+            `GO_AOT_REBUILD=${compilerPart >= 0 ? '1' : '0'}`, 'GO_AOT_TIMING=1'] : []),
         '/bin/sh', ...(go ? ['/mnt/go-aot/build.sh'] : ['-ec', workload])], join(stage, module.name + '-record.log'), {
         env: { ISH_JIT: '1', ISH_JIT_PIC: '1', ISH_JIT_STATS: '1',
             ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: module.path, ISH_JIT_RECORD_MOD_EXACT: '1', ISH_AOT_FAMILY: '0',
             ...(go ? { ISH_JIT_RECORD_TARGET_ONLY: '1' } : {}),
+            ...(compilerPart >= 0 ? { ISH_JIT_RECORD_SHARDS: '2', ISH_JIT_RECORD_SHARD: String(compilerPart) } : {}),
             ...(go ? { ISH_BIND_MOUNTS: `/mnt/go-aot=${join(stage, 'go-workload')}:ro` } : {}) },
         timeout: go ? 3600000 : 240000,
     });
