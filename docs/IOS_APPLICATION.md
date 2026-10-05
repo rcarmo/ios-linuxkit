@@ -1,6 +1,6 @@
 # iOS application
 
-The Xcode project contains two reference ARM64 application schemes and an isolated AOT bootstrap scheme. They package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.5.0 with Apple build number 823; [RELEASES.md](RELEASES.md) defines how to change them.
+The Xcode project contains two reference ARM64 application schemes and an isolated AOT bootstrap scheme. They package the userspace Linux runtime and an AArch64 Alpine rootfs into an iOS application. The current shared version is 2.5.2 with Apple build number 826; [RELEASES.md](RELEASES.md) defines how to change them.
 
 ## Requirements
 
@@ -26,10 +26,9 @@ Change the upstream default `ROOT_BUNDLE_IDENTIFIER` in `app/iSH.xcconfig` to an
 |---|---|---|
 | `iSH-ARM64` | `LinuxKit.app` | Main reference application. |
 | `iSH-ARM64-ffmpeg` | `iSH ARM64 ffmpeg.app` | Test target that defines `ISH_FFMPEG_TEST=1` and registers the built-in fake FFmpeg handler. |
-| `iSH-ARM64-AOT-Bootstrap` | `LinuxKit AOT Bootstrap.app` | Native/no-emitter compilation and symbol inspection; executes gadgets only. |
+| `iSH-ARM64-AOT-Bootstrap` | `LinuxKit AOT Bootstrap.app` | Experimental acceleration using static translations, with runtime code generation disabled. |
 
-The main product name comes from `app/App.xcconfig`; the scheme still contains
-the historical `iSH ARM64.app` display label. Packaging must use the evaluated
+The main product name comes from `app/App.xcconfig`. Packaging must use the evaluated
 `PRODUCT_NAME`, `EXECUTABLE_NAME` and bundle identifiers from Xcode build settings.
 
 Build from Xcode, or use `xcodebuild` with a configured destination and signing identity:
@@ -43,7 +42,7 @@ xcodebuild \
   build
 ```
 
-The exact signing arguments depend on the developer account. A simulator build can use a simulator destination; device and archive builds require valid signing settings. These Xcode commands have not been run on the Debian validation host.
+The exact signing arguments depend on the developer account. A simulator build can use a simulator destination; device and archive builds require valid signing settings.
 
 Xcode 27 requires an iOS deployment target of at least 15.0. Pass
 `IPHONEOS_DEPLOYMENT_TARGET=15.0` when building with that toolchain; the inherited

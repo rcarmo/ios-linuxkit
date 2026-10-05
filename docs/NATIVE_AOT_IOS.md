@@ -38,7 +38,7 @@ Build a signed Release app with translations disabled:
 sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/observation-build \
   DEVELOPMENT_TEAM=YOUR_TEAM ROOT_BUNDLE_IDENTIFIER=YOUR_IDENTIFIER \
   CODE_SIGN_IDENTITY='Apple Development' -allowProvisioningUpdates \
-  CURRENT_PROJECT_VERSION=824 AOT_IMAGE_EXECUTION=0
+  CURRENT_PROJECT_VERSION=826 AOT_IMAGE_EXECUTION=0
 ```
 
 Use fresh build numbers for later builds. Install and launch this app on the
@@ -74,7 +74,7 @@ after the Bun/Pi runtime fixes.
 sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/final-build \
   DEVELOPMENT_TEAM=YOUR_TEAM ROOT_BUNDLE_IDENTIFIER=YOUR_IDENTIFIER \
   CODE_SIGN_IDENTITY='Apple Development' -allowProvisioningUpdates \
-  CURRENT_PROJECT_VERSION=825 AOT_IMAGE_EXECUTION=1 \
+  CURRENT_PROJECT_VERSION=827 AOT_IMAGE_EXECUTION=1 \
   AOT_IMAGES_DIR=/absolute/path/to/new-apple-images
 ```
 
@@ -115,6 +115,8 @@ Run `make test-go-rootfs` to check Go packaging.
 The recording workload formats source, compiles a package, assembles ARM64
 code, builds and runs a program, runs vet and verifies that invalid source is
 rejected. It uses no network access and limits concurrent build jobs.
+First-time builds can still take several minutes while Go compiles its standard
+library. Subsequent builds reuse Go's cache.
 Each Go recording and the compile test allow up to one hour. Compiler recording
 rebuilds the program and its standard-library dependencies, even with a reused
 cache. Go recordings reserve the code arena for the selected tool and reject
