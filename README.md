@@ -18,7 +18,7 @@ This is a reusable runtime kit. The terminal is a reference shell; the runtime a
 
 ## Current state
 
-The current source version is **2.5.2** with Apple build number **826**. The repository supports one guest architecture: ARM64. The interpreter decodes guest instructions into programs of pointers to precompiled host functions. By default, all executable host instructions come from the built application; the interpreter allocates only data for translated programs. The optional native/ahead-of-time (AOT) backend is disabled by default. Linux recording builds may emit native code; AOT-only builds instead link pre-generated translations into the executable. The isolated iOS AOT bootstrap can explicitly enable checked static images; reference iOS schemes remain gadget-only.
+The current source version is **2.5.2** with Apple build number **826**. The repository supports ARM64 Linux programs. Ordinary builds use the interpreter. Optional ahead-of-time (AOT) builds include translated Linux code in the application executable, without generating executable code at runtime. The accelerated iOS build includes Bun and the Go toolchain; code without a matching translation uses the interpreter.
 
 ## What is in the repository
 
@@ -93,30 +93,54 @@ The runtime and CLI targets can install packages into their fakefs. Use a dispos
 
 ## AOT builds
 
-[Build AOT on Linux](docs/NATIVE_AOT_BUILD_PLAN.md) to record musl, BusyBox,
-Python and zlib, link an emission-disabled executable, test it and compare it
-with gadgets. [Freeze and share artifacts](docs/NATIVE_AOT_ARTIFACT_KIT.md)
-for repeatable builds from retained guest bytes and recordings.
-[Prepare iOS images](docs/NATIVE_AOT_IOS.md) after implementing the required
-Apple build and recovery hooks.
+AOT is optional. Translations are generated before building the application
+and linked into its executable. Programs and code paths without matching
+translations use the interpreter.
 
-The tested local prototype improves short shell and zlib workloads by about
-12–13%; Python takes about 15% longer and uses more memory. See the
-[29 September measurements](docs/reports/audits/AOT_ARTIFACT_KIT_2026-09-29.md).
-Package upgrades can invalidate images. Existing installed userlands are left
-unchanged; ordinary Meson and Xcode configurations keep the gadget engine.
+### iPhone and iPad
+
+The `iSH-ARM64-AOT-Bootstrap` scheme builds a separate experimental app with
+Alpine 3.24.2, Bun 1.4.2 and Go 1.26.8-r0. It includes AOT support for:
+
+| Component | Supported code |
+|---|---|
+| musl | Linux C library and dynamic loader. |
+| BusyBox | Shell and basic command-line utilities. |
+| Bun | JavaScript runtime. |
+| Go | Go command, formatter, compiler, assembler, linker and vet tool. |
+
+Go is bundled from Alpine's pinned ARM64 APK, including standard-library
+sources. Pure-Go builds are enabled by default; CGo requires additional Alpine
+packages. First-time compilation can still take several minutes. Later builds
+reuse Go's build cache. Programs compiled in the guest use the interpreter
+unless they have their own matching AOT translations.
+
+Follow the [accelerated iOS build guide](docs/NATIVE_AOT_IOS.md) for recording,
+building, signing and device checks. The ordinary iOS schemes continue to use
+the interpreter. The accelerated build remains experimental, and the reported
+Bun/Pi iPhone crash is still under investigation.
+
+App updates preserve existing Linux files and installed packages. Existing
+filesystems do not gain Bun or Go automatically. Package upgrades can replace
+files used by AOT translations; unmatched code uses the interpreter.
+
+### Linux
+
+The [Linux AOT workflow](docs/NATIVE_AOT_BUILD_PLAN.md) records and tests
+Alpine's musl, BusyBox, Python and zlib, then links the translations into an
+executable with runtime code generation disabled. Python and zlib are not part
+of the bundled iOS AOT set.
+
+Use the [artifact guide](docs/NATIVE_AOT_ARTIFACT_KIT.md) to retain the guest
+files and recordings needed for repeatable builds. Ordinary Meson builds
+continue to use the interpreter.
 
 ## Releases
 
 [2.5.2](docs/reports/releases/IOS_LINUXKIT_2.5.2.md) adds Alpine's Go toolchain
-to accelerated builds and improves first-time compilation. xterm remains the default
-terminal, with Ghostty available as an alternative. The accelerated iPhone
-test build includes Bun 1.4.2; a reported iPhone crash remains under investigation.
-
-The current AOT build also bundles Go from Alpine's pinned ARM64 APK and records
-the Go command, formatter, compiler, assembler, linker and vet tool. See the
-[accelerated iOS build guide](docs/NATIVE_AOT_IOS.md) for packaging, build checks
-and CGo requirements.
+to accelerated builds and improves first-time compilation. xterm remains the
+default terminal, with Ghostty available as an alternative. See the release
+notes for changes and known limitations.
 
 Earlier source releases and dated audits are indexed under
 [reports](docs/reports/README.md). Their measurements apply to the revisions,
