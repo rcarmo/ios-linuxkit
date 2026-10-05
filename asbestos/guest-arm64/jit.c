@@ -2167,7 +2167,9 @@ static void reg_install(struct fiber_block *b, struct jit_ctx *ctx, const struct
 
 // ISH_JIT_RECORD=<file>: at exit, write every translation of the modules whose
 // path contains ISH_JIT_RECORD_MOD (default "ld-musl") for an AOT exporter.
+// ISH_JIT_RECORD_MOD_EXACT=1 selects only that exact path (e.g. go, not gofmt).
 static const char *rec_file, *rec_mod;
+static bool rec_mod_exact;
 static bool module_path_has(int mod, const char *sub);
 static bool rec_module(int mod) {
     return rec_file && module_path_has(mod, rec_mod);
@@ -3005,7 +3007,8 @@ static int mod_match(int mod, const struct aot_module *m) {
 
 static bool module_path_has(int mod, const char *sub) {
     pthread_mutex_lock(&cm_lock);
-    bool has = mod >= 0 && (unsigned) mod < cm_nmods && strstr(cm_mods[mod].path, sub);
+    bool has = mod >= 0 && (unsigned) mod < cm_nmods &&
+        (rec_mod_exact ? strcmp(cm_mods[mod].path, sub) == 0 : strstr(cm_mods[mod].path, sub) != NULL);
     pthread_mutex_unlock(&cm_lock);
     return has;
 }
@@ -3423,6 +3426,7 @@ static void jit_init(void) {
     cm_on = getenv("ISH_JIT_MAP") != NULL;
     rec_file = pic_on && have_region ? getenv("ISH_JIT_RECORD") : NULL;
     rec_mod = getenv("ISH_JIT_RECORD_MOD") ? getenv("ISH_JIT_RECORD_MOD") : "ld-musl";
+    rec_mod_exact = getenv("ISH_JIT_RECORD_MOD_EXACT") && strcmp(getenv("ISH_JIT_RECORD_MOD_EXACT"), "1") == 0;
     if (have_region) {
         make_exit_stub();
         jit_exec_ready();

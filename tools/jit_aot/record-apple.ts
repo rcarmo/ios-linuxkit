@@ -35,7 +35,10 @@ await Bun.write(join(stage, 'target-contract.json'), JSON.stringify(contract, nu
 // Formatting, direct compile/asm, linking and vet still run on every invocation.
 const order = [...modules.slice(0, 3), modules.find(module => module.name === 'go_compile')!,
     ...modules.slice(3).filter(module => module.name !== 'go_compile')];
-const goCache = `/tmp/go-aot-record-cache-${process.pid}`;
+const existingGoCache = process.env.APPLE_AOT_GO_CACHE;
+if (existingGoCache && !/^\/tmp\/go-aot-record-cache-[0-9]+$/.test(existingGoCache))
+    throw Error('APPLE_AOT_GO_CACHE must name a previous recording cache in this guest');
+const goCache = existingGoCache || `/tmp/go-aot-record-cache-${process.pid}`;
 const results: any[] = [];
 for (const module of order) {
     const guest = join(root, 'data', module.path), hash = await sha(guest);
@@ -47,9 +50,9 @@ for (const module of order) {
         ...(go ? [`GO_AOT_CACHE=${goCache}`] : []),
         '/bin/sh', ...(go ? ['/mnt/go-aot/build.sh'] : ['-ec', workload])], join(stage, module.name + '-record.log'), {
         env: { ISH_JIT: '1', ISH_JIT_PIC: '1', ISH_JIT_STATS: '1',
-            ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: module.path, ISH_AOT_FAMILY: '0',
+            ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: module.path, ISH_JIT_RECORD_MOD_EXACT: '1', ISH_AOT_FAMILY: '0',
             ...(go ? { ISH_BIND_MOUNTS: `/mnt/go-aot=${join(stage, 'go-workload')}:ro` } : {}) },
-        timeout: go ? 1200000 : 240000,
+        timeout: go ? 3600000 : 240000,
     });
     if (!stdout.split('\n').includes(go ? 'GO_AOT_BUILD_OK' : 'APPLE_AOT_TRAIN_OK')) throw Error('missing workload completion');
     const rows = readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line));
@@ -71,9 +74,11 @@ for (const module of order) {
     if (await sha(guest) !== hash) throw Error('guest changed while recording');
     results.push({ ...module, sha256: hash, translations: rows.length, header });
 }
-checked([recorder, '-f', root, '/bin/rm', '-rf', goCache], join(stage, 'go-cache-cleanup.log'), { env: { ISH_JIT: '0' } });
+if (!existingGoCache)
+    checked([recorder, '-f', root, '/bin/rm', '-rf', goCache], join(stage, 'go-cache-cleanup.log'), { env: { ISH_JIT: '0' } });
 results.sort((a, b) => modules.findIndex(module => module.name === a.name) - modules.findIndex(module => module.name === b.name));
 await seal(stage, out, { kind: 'apple-bun-images', format: 'macho', contract, modules: results,
     recorderSha256: await sha(recorder), sourceRevision: checked(['git', 'rev-parse', 'HEAD']).trim(),
+    reusedGoBuildCache: !!existingGoCache,
     validation: 'recorded/generation only; linked execution and device gates required' });
 console.log(`Sealed Apple images: ${out}`);

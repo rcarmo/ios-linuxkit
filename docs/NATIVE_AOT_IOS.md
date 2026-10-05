@@ -114,6 +114,11 @@ Run `make test-go-rootfs` to check Go packaging.
 The recording workload formats source, compiles a package, assembles ARM64
 code, builds and runs a program, runs vet and verifies that invalid source is
 rejected. It uses no network access and limits concurrent build jobs.
+Cold compilation can take longer than twenty minutes. Each Go recording and
+the compile test allow up to one hour. To reuse the Go build cache after an
+interrupted recording, set `APPLE_AOT_GO_CACHE` to that recording's
+`/tmp/go-aot-record-cache-NUMBER` directory in the same guest filesystem.
+Reused caches are retained, and the image manifest identifies their use.
 To repeat it in a writable Mac test filesystem:
 
 ```sh
@@ -122,8 +127,19 @@ ROOTFS=/absolute/path/to/bun-go-fakefs ISH_JIT=1 GO_AOT_NO_EMIT=1 \
   bun test tests/host/go-aot.test.ts
 ```
 
+Check that the recorder keeps Go and gofmt in separate images:
+
+```sh
+GO_AOT_RECORDER=/absolute/path/to/darwin-recorder \
+ROOTFS=/absolute/path/to/bun-go-fakefs \
+  bun test tests/host/go-aot-record.test.ts
+```
+
 Translations cover the compiler tools, not arbitrary programs you compile.
 New Go programs and tools without matching translations use the interpreter.
+Go compilation has crashed in the accelerated Mac build. A successful retry
+does not establish stability, and Go acceleration has not yet been tested on
+a physical device.
 
 ## Check on the device
 
