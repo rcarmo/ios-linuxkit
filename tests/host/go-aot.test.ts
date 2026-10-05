@@ -4,9 +4,9 @@ import { resolve } from 'node:path';
 const ish = process.env.ISH_BIN, root = process.env.ROOTFS;
 test.skipIf(!ish || !root)('bundled Go formats, compiles, assembles, links and vets without downloads', () => {
     const fixture = resolve(import.meta.dir, '../arm64/benchmarks/go-aot');
-    const run = Bun.spawnSync([resolve(ish!), '-f', resolve(root!), '/bin/sh', '/mnt/go-aot/build.sh'], {
+    const run = Bun.spawnSync([resolve(ish!), '-f', resolve(root!), '/usr/bin/env',
+        'GO_AOT_TIMING=1', '/bin/sh', '/mnt/go-aot/build.sh'], {
         env: { ...process.env, ISH_JIT: process.env.ISH_JIT || '0', ISH_JIT_STATS: '1',
-            GO_AOT_TIMING: '1',
             ISH_BIND_MOUNTS: `/mnt/go-aot=${fixture}:ro` },
         timeout: 3600000,
     });
