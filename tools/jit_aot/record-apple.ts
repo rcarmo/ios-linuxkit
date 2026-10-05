@@ -47,10 +47,12 @@ for (const module of order) {
     console.log(`Recording ${module.name}`);
     const stdout = checked([recorder, '-f', root, '/usr/bin/env',
         'BUN_JSC_useJIT=0', 'BUN_RUNTIME_TRANSPILER_CACHE_PATH=0',
-        ...(go ? [`GO_AOT_CACHE=${goCache}`, `GO_AOT_VET_FIRST=${module.name === 'go_vet' ? '1' : '0'}`] : []),
+        ...(go ? [`GO_AOT_CACHE=${goCache}`, `GO_AOT_VET_FIRST=${module.name === 'go_vet' ? '1' : '0'}`,
+            `GO_AOT_REBUILD=${module.name === 'go_compile' ? '1' : '0'}`] : []),
         '/bin/sh', ...(go ? ['/mnt/go-aot/build.sh'] : ['-ec', workload])], join(stage, module.name + '-record.log'), {
         env: { ISH_JIT: '1', ISH_JIT_PIC: '1', ISH_JIT_STATS: '1',
             ISH_JIT_RECORD: record, ISH_JIT_RECORD_MOD: module.path, ISH_JIT_RECORD_MOD_EXACT: '1', ISH_AOT_FAMILY: '0',
+            ...(go ? { ISH_JIT_RECORD_TARGET_ONLY: '1' } : {}),
             ...(go ? { ISH_BIND_MOUNTS: `/mnt/go-aot=${join(stage, 'go-workload')}:ro` } : {}) },
         timeout: go ? 3600000 : 240000,
     });
@@ -58,6 +60,8 @@ for (const module of order) {
     const rows = readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     const header = rows.shift()?.header;
     matchContract(header, contract, binaryHash);
+    if (go && header.region_exhausted !== false)
+        throw Error(`incomplete ${module.name} recording: code arena exhausted or recorder lacks capacity diagnostics`);
     if (!rows.length || rows.some(row => row.header || row.mod !== module.path) || !rows.some(row => row.segs?.length))
         throw Error('invalid/empty recording');
     const required = new Set<string>(['ish_aot_register']);

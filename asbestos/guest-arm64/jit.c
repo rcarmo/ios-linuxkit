@@ -100,6 +100,7 @@ static uint8_t *region;   // executable view
 static intptr_t rw_delta; // writable view - executable view
 static bool dual_map;
 static _Atomic size_t region_used;
+static _Atomic bool region_exhausted;
 
 #ifndef ISH_JIT_NO_EMIT   // AOT-only builds never map executable memory
 static bool map_dual(void) {
@@ -167,8 +168,10 @@ static uint8_t *region_alloc(size_t bytes) {
     size_t aligned = (bytes + 15) & ~(size_t) 15;
     size_t off = atomic_load_explicit(&region_used, memory_order_relaxed);
     for (;;) {
-        if (off > REGION_SIZE || aligned > REGION_SIZE - off)
+        if (off > REGION_SIZE || aligned > REGION_SIZE - off) {
+            atomic_store_explicit(&region_exhausted, true, memory_order_relaxed);
             return NULL;
+        }
         if (atomic_compare_exchange_weak_explicit(&region_used, &off, off + aligned,
                                                   memory_order_relaxed, memory_order_relaxed))
             return region + off;
@@ -2169,7 +2172,7 @@ static void reg_install(struct fiber_block *b, struct jit_ctx *ctx, const struct
 // path contains ISH_JIT_RECORD_MOD (default "ld-musl") for an AOT exporter.
 // ISH_JIT_RECORD_MOD_EXACT=1 selects only that exact path (e.g. go, not gofmt).
 static const char *rec_file, *rec_mod;
-static bool rec_mod_exact;
+static bool rec_mod_exact, rec_target_only;
 static bool module_path_has(int mod, const char *sub);
 static bool rec_module(int mod) {
     return rec_file && module_path_has(mod, rec_mod);
@@ -2717,6 +2720,9 @@ static void jit_translate(struct fiber_block *b, const struct jit_units *U, stru
     struct asbestos *a = cm_tlb ? cm_tlb->mmu->asbestos : NULL;
     if (mod < 0 || !a || !U->n || !one_mapping(U, mod, base))
         return;
+    // Keep unrelated workload tools from consuming a recording's bounded arena.
+    if (rec_target_only && !rec_module(mod))
+        return;
     // This process's own translations need a context with room for CTX_MAX
     // indices (8MB of address space, per module mapping of every guest
     // process, all in this one host process): not made when only images run.
@@ -3067,7 +3073,8 @@ static void rec_write(const char *path) {
     if (t && w)
         qsort(w, nw, sizeof(*w), rec_where_cmp);
     // The conventions the code was generated with.
-    fprintf(f, "{\"header\": {\"abi\": %u, \"prologue_words\": %d, \"entry_off\": %lu, \"n_pinned\": %d, \"exit_stub\": [",
+    fprintf(f, "{\"header\": {\"region_exhausted\": %s, \"abi\": %u, \"prologue_words\": %d, \"entry_off\": %lu, \"n_pinned\": %d, \"exit_stub\": [",
+            atomic_load_explicit(&region_exhausted, memory_order_relaxed) ? "true" : "false",
             jit_abi(), prologue_words, (unsigned long) entry_off(), n_pinned);
     for (unsigned i = 0; i < exit_stub_words; i++)
         fprintf(f, "%s%u", i ? ", " : "", ((uint32_t *) exit_stub)[i]);
@@ -3427,6 +3434,8 @@ static void jit_init(void) {
     rec_file = pic_on && have_region ? getenv("ISH_JIT_RECORD") : NULL;
     rec_mod = getenv("ISH_JIT_RECORD_MOD") ? getenv("ISH_JIT_RECORD_MOD") : "ld-musl";
     rec_mod_exact = getenv("ISH_JIT_RECORD_MOD_EXACT") && strcmp(getenv("ISH_JIT_RECORD_MOD_EXACT"), "1") == 0;
+    rec_target_only = rec_file && getenv("ISH_JIT_RECORD_TARGET_ONLY") &&
+        strcmp(getenv("ISH_JIT_RECORD_TARGET_ONLY"), "1") == 0;
     if (have_region) {
         make_exit_stub();
         jit_exec_ready();
