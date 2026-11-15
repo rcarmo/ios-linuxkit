@@ -38,7 +38,7 @@ Build a signed Release app with translations disabled:
 sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/observation-build \
   DEVELOPMENT_TEAM=YOUR_TEAM ROOT_BUNDLE_IDENTIFIER=YOUR_IDENTIFIER \
   CODE_SIGN_IDENTITY='Apple Development' -allowProvisioningUpdates \
-  CURRENT_PROJECT_VERSION=826 AOT_IMAGE_EXECUTION=0
+  CURRENT_PROJECT_VERSION=827 AOT_IMAGE_EXECUTION=0
 ```
 
 Use fresh build numbers for later builds. Install and launch this app on the
@@ -84,7 +84,7 @@ exhausted arenas are rejected; use the existing Go compiler shards when needed.
 sh scripts/build-ios-aot-bootstrap.sh /absolute/path/to/final-build \
   DEVELOPMENT_TEAM=YOUR_TEAM ROOT_BUNDLE_IDENTIFIER=YOUR_IDENTIFIER \
   CODE_SIGN_IDENTITY='Apple Development' -allowProvisioningUpdates \
-  CURRENT_PROJECT_VERSION=827 AOT_IMAGE_EXECUTION=1 \
+  CURRENT_PROJECT_VERSION=828 AOT_IMAGE_EXECUTION=1 \
   AOT_IMAGES_DIR=/absolute/path/to/new-apple-images
 ```
 

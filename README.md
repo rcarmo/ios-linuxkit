@@ -18,7 +18,7 @@ This is a reusable runtime kit. The terminal is a reference shell; the runtime a
 
 ## Current state
 
-The current source version is **2.5.2** with Apple build number **826**. The repository supports ARM64 Linux programs. Ordinary builds use the interpreter. Optional ahead-of-time (AOT) builds include translated Linux code in the application executable, without generating executable code at runtime. The accelerated iOS build includes Bun and the Go toolchain; code without a matching translation uses the interpreter.
+The current source version is **2.6.0** with Apple build number **827**. The repository supports ARM64 Linux programs. Ordinary builds use the interpreter. Optional ahead-of-time (AOT) builds include translated Linux code in the application executable, without generating executable code at runtime. The accelerated iOS build includes Bun and the Go toolchain; code without a matching translation uses the interpreter.
 
 ## What is in the repository
 
