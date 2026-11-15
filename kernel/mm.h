@@ -5,22 +5,23 @@
 #include "kernel/memory.h"
 #include "misc.h"
 
-// Maximum anonymous mmap pages across ALL processes (host memory cap).
-// Prevents iOS app from being killed by jetsam.
-// 0 = no limit. Non-zero = hard limit in pages (4KB each).
-// Go runtime alone needs ~1.1GB for page summary reservations (PROT_NONE).
-// 524288 pages = 2GB.
+// Logical committed anonymous guest-page ceiling across all processes.
+// Not host RSS, a physical-memory guarantee, or iOS jetsam protection.
+// 0 = no logical limit; pressure admission is independently opt-in.
+// PROT_NONE reservations are not charged. Default: 1048576 * 4KiB = 4GiB.
+#ifndef ANON_MMAP_LIMIT_PAGES
 #define ANON_MMAP_LIMIT_PAGES 1048576
+#endif
 
 #if ANON_MMAP_LIMIT_PAGES > 0
 extern _Atomic long anon_page_count;
 // Logical committed anonymous guest pages, not host RSS/physical footprint.
 bool anon_pages_reserve(long pages);
 void anon_pages_unreserve(long pages);
+#endif
 static inline bool anon_page_is_charged(unsigned flags) {
     return (flags & P_ANONYMOUS) && (flags & P_RWX);
 }
-#endif
 
 // uses mem.lock instead of having a lock of its own
 struct mm {

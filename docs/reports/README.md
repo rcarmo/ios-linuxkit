@@ -13,6 +13,8 @@ package versions and commands may be outdated. Use the
 
 ## Recent reports
 
+- [Portable admission / Linux validation](audits/MEMORY_ADMISSION_LINUX_2026-11-15.md): post-2.6.0 accounting/publication fixes, default-off tickets, opt-in sampler and explicit platform deferrals.
+- [Held-out qualification](audits/HELDOUT_LINUX_2026-11-15.md): frozen ABI15 Python/Bun/Go baselines; no new speedup or arbitrary-Go AOT claim.
 - [OpenMinis completion](audits/OPENMINIS_COMPLETION_2026-11-15.md): fd/poll
   ownership, shared AOT paths, profiling, stale TLBs, SHA512 fallback and ABI-15 gates.
 - [Crate/OpenMinis follow-up and Bun 1.4.4](audits/CRATE_OPENMINIS_2026-11-15.md):

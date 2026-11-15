@@ -10,6 +10,9 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include "kernel/calls.h"
+#ifdef __linux__
+#include "kernel/memory_pressure_linux.h"
+#endif
 #include "kernel/task.h"
 #include "fs/path.h"
 #include "emu/cpu.h"
@@ -256,6 +259,22 @@ int main(int argc, char *const argv[]) {
     const char *term = getenv("TERM");
     if (term && term[0] != '\0')
         append_boot_env(envp, sizeof(envp), &p, "TERM=%s", term);
+    const char *pressure = getenv("ISH_MEMORY_PRESSURE");
+    if (pressure && strcmp(pressure, "0")) {
+        if (strcmp(pressure, "1")) {
+            fprintf(stderr, "ISH_MEMORY_PRESSURE must be 0 or 1\n");
+            return 2;
+        }
+#ifdef __linux__
+        if (memory_pressure_linux_start()) {
+            fprintf(stderr, "memory pressure sampler: %s\n", strerror(errno));
+            return 2;
+        }
+#else
+        fprintf(stderr, "ISH_MEMORY_PRESSURE: no sampler for this platform\n");
+        return 2;
+#endif
+    }
     int err = xX_main_Xx(argc, argv, envp);
     if (err < 0) {
         fprintf(stderr, "xX_main_Xx: %s\n", strerror(-err));

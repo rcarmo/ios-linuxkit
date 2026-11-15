@@ -24,6 +24,7 @@ static void mem_changed(struct mem *mem);
 static struct mmu_ops mem_mmu_ops;
 
 #include "kernel/mm.h"
+#include "kernel/memory_policy.h"
 #include "emu/tlb.h"
 
 static void reacquire_read_after_failed_jit_upgrade(wrlock_t *lock) {
@@ -193,6 +194,9 @@ int mem_set_reservation_flags(struct mem *mem, page_t start, pages_t pages, unsi
         } else {
             r->flags = new_flags;
         }
+        // A later reservation split may fail allocation. Publish this committed
+        // prefix now, just as for materialized protection changes.
+        mem_changed(mem);
     }
     return 0;
 }
@@ -597,7 +601,8 @@ int pt_unmap_always(struct mem *mem, page_t start, pages_t pages) {
         if (--data->refcount == 0) {
             // vdso wasn't allocated with mmap, it's just in our data segment
             if (data->data != vdso_data) {
-                munmap(data->data, data->size);
+                if (munmap(data->data, data->size) == 0)
+                    ish_memory_policy_release(atomic_load(&data->policy_bytes));
             }
             if (data->fd != NULL) {
                 fd_close(data->fd);
@@ -618,21 +623,23 @@ int pt_map_nothing(struct mem *mem, page_t start, pages_t pages, unsigned flags)
     if (!(flags & P_READ) && !(flags & P_WRITE) && !(flags & P_EXEC))
         host_prot = PROT_NONE;
     size_t map_size = (size_t)pages * PAGE_SIZE;
-#if ANON_MMAP_LIMIT_PAGES > 0
     bool charged = anon_page_is_charged(flags | P_ANONYMOUS);
-    if (charged && !anon_pages_reserve((long)pages))
+    struct ish_memory_ticket ticket = {0};
+    if (!ish_memory_reserve_ticket(charged ? (long)pages : 0,
+            charged ? map_size : 0, &ticket))
         return _ENOMEM;
-#endif
     void *memory = mmap(NULL, map_size, host_prot, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
     int err = memory == MAP_FAILED ? _ENOMEM :
         pt_map_accounted(mem, start, pages, memory, 0, flags | P_ANONYMOUS, true);
-#if ANON_MMAP_LIMIT_PAGES > 0
-    // Explicit ownership transfer; no thread-local credit or transient double charge.
-    if (err < 0 && charged)
-        anon_pages_unreserve((long)pages);
-#endif
-    if (err < 0 && memory != MAP_FAILED)
-        munmap(memory, map_size);
+    // Keep pending admission through cleanup, then transfer debt to the backing.
+    if (err < 0 && memory != MAP_FAILED && munmap(memory, map_size) < 0) {
+        // The guest map failed, but the host backing may still exist. Refund
+        // logical pages without granting the pressure budget fictitious credit.
+        ish_memory_abandon_ticket(&ticket);
+        return err;
+    }
+    uint64_t debt = anon_pages_finish_ticket(&ticket, err == 0);
+    if (err == 0) atomic_fetch_add(&mem_pt(mem, start)->data->policy_bytes, debt);
     return err;
 }
 
@@ -652,8 +659,12 @@ int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
         struct pt_entry *entry = mem_pt(mem, page);
         if (entry == NULL)
             continue;
-        int old_flags = entry->flags;
+        unsigned old_flags = entry->flags;
         unsigned new_flags = flags | (old_flags & P_META_FLAGS);
+        int delta = (int)anon_page_is_charged(new_flags) - (int)anon_page_is_charged(old_flags);
+        struct ish_memory_ticket ticket = {0};
+        if (delta > 0 && !anon_pages_reserve_ticket(delta, &ticket))
+            return _ENOMEM;
 
         // check if protection is increasing
         if ((flags & ~old_flags) & (P_READ|P_WRITE)) {
@@ -662,14 +673,21 @@ int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
             data = (void *) ((uintptr_t) data & ~(real_page_size - 1));
             int prot = PROT_READ;
             if (flags & P_WRITE) prot |= PROT_WRITE;
-            if (mprotect(data, real_page_size, prot) < 0)
-                return errno_map();
+            if (mprotect(data, real_page_size, prot) < 0) {
+                int err = errno_map();
+                if (ticket.active) anon_pages_finish_ticket(&ticket, false);
+                return err;
+            }
         }
         entry->flags = new_flags;
+        if (ticket.active)
+            atomic_fetch_add(&entry->data->policy_bytes, anon_pages_finish_ticket(&ticket, true));
 #if ANON_MMAP_LIMIT_PAGES > 0
-        int delta = (int)anon_page_is_charged(new_flags) - (int)anon_page_is_charged(old_flags);
-        atomic_fetch_add(&anon_page_count, delta);
+        if (delta < 0) anon_pages_unreserve(-delta);
 #endif
+        // Earlier pages remain changed if a later protection/admission fails.
+        // Publish each successful mutation before any subsequent failure exit.
+        if (new_flags != old_flags) mem_changed(mem);
     }
     int err = mem_set_reservation_flags(mem, start, pages, flags);
     if (err < 0)
@@ -879,14 +897,11 @@ have_entry:
                 // than temporarily exposing shared backing or crashing the host.
                 failed = !(entry->flags & P_RWX) ||
                     (type == MEM_WRITE && !(entry->flags & P_WRITE));
-#if ANON_MMAP_LIMIT_PAGES > 0
                 bool precharged = !anon_page_is_charged(entry->flags) &&
                     anon_page_is_charged(flags);
-                bool reserved = !failed && precharged && anon_pages_reserve(1);
-                if (!failed && precharged && !reserved) failed = true;
-#else
-                bool precharged = false;
-#endif
+                struct ish_memory_ticket ticket = {0};
+                if (!failed && !ish_memory_reserve_ticket(precharged ? 1 : 0, PAGE_SIZE, &ticket))
+                    failed = true;
                 void *copy = MAP_FAILED;
                 if (!failed) {
                     copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
@@ -897,10 +912,14 @@ have_entry:
                     memcpy(copy, (char *)entry->data->data + entry->offset, PAGE_SIZE);
                     failed = pt_map_accounted(mem, page, 1, copy, 0, flags, precharged) < 0;
                 }
-                if (failed && copy != MAP_FAILED) munmap(copy, PAGE_SIZE);
-#if ANON_MMAP_LIMIT_PAGES > 0
-                if (failed && reserved) anon_pages_unreserve(1);
-#endif
+                bool orphaned = failed && copy != MAP_FAILED && munmap(copy, PAGE_SIZE) < 0;
+                if (ticket.active) {
+                    if (orphaned) ish_memory_abandon_ticket(&ticket);
+                    else {
+                        uint64_t debt = anon_pages_finish_ticket(&ticket, !failed);
+                        if (!failed) atomic_fetch_add(&mem_pt(mem, page)->data->policy_bytes, debt);
+                    }
+                }
             }
             write_wrunlock(&mem->lock);
             read_wrlock(&mem->lock);

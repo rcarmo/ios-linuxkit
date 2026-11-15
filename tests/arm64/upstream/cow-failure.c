@@ -1,4 +1,4 @@
-// Allocation rollback in actual CoW/ptrace paths, independent of policy APIs.
+// Actual CoW/ptrace rollback; optionally repeat with explicit test admission.
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -10,6 +10,7 @@
 #include "kernel/memory.h"
 #include "kernel/mm.h"
 #include "fs/real.h"
+#include "policy-test.h"
 static bool fail_map, fail_data, tracking;
 static void *live_copy;
 static unsigned maps, unmaps;
@@ -35,8 +36,10 @@ int main(int argc, char **argv) {
     bool ptrace = !strncmp(argv[1], "ptrace-", 7);
     const char *mode = ptrace ? argv[1] + 7 : argv[1];
     bool none = !strcmp(mode, "none"), success = !strcmp(mode, "success");
+    bool refusal = !strcmp(mode, "policy");
     assert(!none || ptrace);
     assert(mount_root(&realfs, "/") == 0 && become_first_process() == 0);
+    upstream_policy_start();
     unsigned flags = none ? 0 : ptrace ? P_READ : P_READ | P_WRITE;
     assert(pt_map_nothing(current->mem, 0x90, 1, flags) == 0);
     struct mem child; mem_init(&child);
@@ -48,7 +51,8 @@ int main(int argc, char **argv) {
     uint64_t changes = current->mem->mmu.changes;
     if (!strcmp(mode, "mmap")) fail_map = true;
     else if (!strcmp(mode, "data")) fail_data = true;
-    else assert(none || success);
+    else assert(none || success || refusal);
+    if (refusal) ish_memory_policy_invalidate();
     char value = 42;
     tracking = true;
     if (ptrace) {
@@ -72,8 +76,19 @@ int main(int argc, char **argv) {
         assert(*(char *)entry->data->data == value && current->mem->mmu.changes > changes);
     }
     if (!ptrace) assert(*(char *)mem_pt(&child, 0x90)->data->data == 0);
+    if (refusal) {
+        upstream_policy_feed();
+        if (ptrace) {
+            read_wrlock(&current->mem->lock);
+            char *p = mem_ptr(current->mem, 0x90000, MEM_WRITE_PTRACE);
+            assert(p); *p = value;
+            read_wrunlock(&current->mem->lock);
+        } else assert(user_write(0x90000, &value, 1) == 0);
+        assert(*(char *)mem_pt(current->mem, 0x90)->data->data == value);
+    }
     mem_destroy(&child);
     assert(pt_unmap(current->mem, 0x90, 1) == 0);
     assert(atomic_load(&anon_page_count) == 0 && !live_copy && maps == unmaps);
+    upstream_policy_empty();
     puts("cow-allocation-failure-ok");
 }

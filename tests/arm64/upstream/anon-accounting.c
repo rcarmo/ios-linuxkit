@@ -91,6 +91,17 @@ int main(void) {
     assert(moved != a && (int64_t)moved > 0); count(5);
     assert(sys_munmap(moved, 16384) == 0); count(1);
     assert(pt_unmap(current->mem, PAGE(a) + 2, 1) == 0); count(0);
+    // brk must use central admission once, and shrink must refund the same charge.
+    addr_t saved_start = current->mm->start_brk, saved_brk = current->mm->brk;
+    current->mm->start_brk = current->mm->brk = 0x400000;
+    assert(sys_brk(0x401001) == 0x401001); count(2);
+    assert(sys_brk(0x400000) == 0x400000); count(0);
+    fail_map = true;
+    assert(sys_brk(0x401001) == 0x400000); assert(!fail_map); count(0);
+    atomic_store(&anon_page_count, ANON_MMAP_LIMIT_PAGES - 1);
+    assert(sys_brk(0x401001) == 0x400000); count(ANON_MMAP_LIMIT_PAGES - 1);
+    atomic_store(&anon_page_count, 0);
+    current->mm->start_brk = saved_start; current->mm->brk = saved_brk;
     // Failed cap reservation leaves no map or stale charge.
     atomic_store(&anon_page_count, ANON_MMAP_LIMIT_PAGES);
     assert(pt_map_nothing(current->mem, 0x40, 1, P_READ) == _ENOMEM);

@@ -12,9 +12,10 @@
 _Atomic long anon_page_count;
 
 bool anon_pages_reserve(long pages) {
+    if (pages < 0) return false;
     long count = atomic_load(&anon_page_count);
     do {
-        if (pages > ANON_MMAP_LIMIT_PAGES || count > ANON_MMAP_LIMIT_PAGES - pages)
+        if (count < 0 || pages > ANON_MMAP_LIMIT_PAGES || count > ANON_MMAP_LIMIT_PAGES - pages)
             return false;
     } while (!atomic_compare_exchange_weak(&anon_page_count, &count, count + pages));
     return true;
@@ -119,9 +120,8 @@ static addr_t do_mmap(addr_t addr, uint64_t len, dword_t prot, dword_t flags, fd
         prot |= P_SHARED;
 
     if (flags & MMAP_ANONYMOUS) {
-        // PROT_NONE mappings (guard regions) don't consume real memory,
-        // so don't count them against the anonymous page limit.
-        bool is_prot_none = !(prot & P_READ) && !(prot & P_WRITE) && !(prot & P_EXEC);
+        // Central allocation owns logical accounting/admission. Lazy PROT_NONE
+        // reservations remain distinct from committed anonymous backing.
 #ifdef GUEST_ARM64
         if ((flags & MMAP_NORESERVE) && pages >= 0x10000) {
             if (!caller_hint_used) {
@@ -404,18 +404,11 @@ addr_t sys_brk(addr_t new_brk) {
         pages_t size = PAGE_ROUND_UP(new_brk) - PAGE_ROUND_UP(old_brk);
         if (!pt_is_hole(&mm->mem, start, size))
             goto out;
-#if ANON_MMAP_LIMIT_PAGES > 0
-        if (atomic_load(&anon_page_count) + (long)size > ANON_MMAP_LIMIT_PAGES)
-            goto out;
-        atomic_fetch_add(&anon_page_count, (long)size);
-#endif
+        // pt_map_nothing owns admission and rollback, including brk growth.
+        // A second caller-side charge would leak pages on subsequent shrink.
         int err = pt_map_nothing(&mm->mem, start, size, P_WRITE);
-        if (err < 0) {
-#if ANON_MMAP_LIMIT_PAGES > 0
-            atomic_fetch_sub(&anon_page_count, (long)size);
-#endif
+        if (err < 0)
             goto out;
-        }
     } else if (new_brk < old_brk) {
         // shrink heap: unmap pages that are entirely above new_brk
         // PAGE_ROUND_UP(new_brk) is the first page we can safely unmap

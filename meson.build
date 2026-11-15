@@ -127,6 +127,8 @@ if get_option('kernel') == 'ish'
         'kernel/exit.c',
         'kernel/time.c',
         'kernel/mmap.c',
+    'kernel/memory_policy.c',
+    host_machine.system() == 'linux' ? ['kernel/memory_pressure_linux.c', 'kernel/memory_pressure_feed.c'] : [],
         'kernel/uname.c',
         'kernel/tls.c',
         'kernel/futex.c',

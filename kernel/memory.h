@@ -87,6 +87,8 @@ void mem_next_page(struct mem *mem, page_t *page);
 struct data {
     void *data; // immutable
     size_t size; // also immutable
+    // Shared admitted debt is released only on final host-backing destruction.
+    _Atomic uint64_t policy_bytes;
     atomic_uint refcount;
 
     // for display in /proc/pid/maps

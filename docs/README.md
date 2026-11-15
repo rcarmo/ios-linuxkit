@@ -12,6 +12,7 @@ The maintained documentation describes the current `master` branch. Dated eviden
 | [NATIVE_AOT_BUILD_PLAN.md](NATIVE_AOT_BUILD_PLAN.md) | Build, train, link, run and measure Linux AOT. |
 | [NATIVE_AOT_ARTIFACT_KIT.md](NATIVE_AOT_ARTIFACT_KIT.md) | Freeze a guest, restore inputs, validate and publish a reusable build. |
 | [NATIVE_AOT_IOS.md](NATIVE_AOT_IOS.md) | Build, sign and test an accelerated iOS app. |
+| [MEMORY_ADMISSION.md](MEMORY_ADMISSION.md) | Portable default-off admission, conservative backing debt, Linux sampling and deferred Darwin contract. |
 | [NATIVE_OFFLOAD.md](NATIVE_OFFLOAD.md) | Startup registration, legacy/cooperative ownership, guest VFS, cancellation, restricted TCP and test-only local-copy contracts. |
 | [NETLINK_TAILSCALE.md](NETLINK_TAILSCALE.md) | Opt-in read-only interface discovery, isolated Tailscale probe and networking limits. |
 | [VALIDATION.md](VALIDATION.md) | Build and runtime tests, results and failure rules. |
@@ -30,7 +31,7 @@ Reports record a result at a named date or revision. Paths, package versions and
 | [reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md](reports/benchmarks/ARM_LINUX_LOAD_PC_2026-09-05.md) | Load-dispatch profiling, precise fault-PC regression and paired measurements against 2.1.2. |
 | [reports/benchmarks/game/](reports/benchmarks/game/) | Benchmarks Game harness and per-language results. |
 | [reports/benchmarks/historical/](reports/benchmarks/historical/) | Retired x86/ARM64 compatibility and performance comparisons. |
-| [reports/releases/](reports/releases/) | Source-release validation, production baseline and staging records; latest: [2.5.0](reports/releases/IOS_LINUXKIT_2.5.0.md). |
+| [reports/releases/](reports/releases/) | Source-release validation, production baseline and staging records; latest: [2.6.0](reports/releases/IOS_LINUXKIT_2.6.0.md). |
 | [reports/workloads/](reports/workloads/) | Workload investigations such as `go-gte`. |
 
 ## Provenance

@@ -4,6 +4,10 @@
 
 MESON ?= meson
 NINJA ?= ninja
+# A command such as "ninja -j2" is not an executable path for Meson's
+# internal NINJA lookup. Keep the make command, not an inherited env override.
+unexport NINJA
+BUN ?= bun
 CC ?= clang
 
 RELEASE_BUILD_DIR ?= build-arm64-linux
@@ -267,6 +271,19 @@ test-arm64-upstream: build-arm64-linux
 	./tests/arm64/upstream/run.sh
 
 .PHONY: test-arm64-import-fixes test-arm64-poll-fixes test-arm64-socket-ownership test-arm64-sha512-fallback test-arm64-tlb-stale
+.PHONY: test-arm64-memory-policy test-arm64-memory-pressure test-arm64-memory-pressure-cgroup test-arm64-heldout-contract
+test-arm64-memory-policy: build-arm64-linux
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" bash tests/arm64/upstream/run-memory-policy.sh
+
+test-arm64-memory-pressure:
+	bash tests/arm64/upstream/memory-pressure-linux-run.sh
+
+test-arm64-memory-pressure-cgroup: build-arm64-linux
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" bash tests/arm64/upstream/run-memory-pressure-cgroup.sh
+
+test-arm64-heldout-contract:
+	$(BUN) test tests/arm64/native-aot/heldout.test.ts
+
 test-arm64-import-fixes: test-arm64-poll-fixes test-arm64-socket-ownership test-arm64-sha512-fallback test-arm64-tlb-stale
 
 test-arm64-poll-fixes:

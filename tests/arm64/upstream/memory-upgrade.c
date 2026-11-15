@@ -8,6 +8,7 @@
 #include "kernel/init.h"
 #include "kernel/calls.h"
 #include "fs/real.h"
+#include "policy-test.h"
 static struct task *owner;
 static int action, pending_action;
 static bool contention;
@@ -73,6 +74,7 @@ int __wrap_pthread_rwlock_trywrlock(pthread_rwlock_t *lock) {
 int main(int argc, char **argv) {
     assert(argc == 2);
     assert(mount_root(&realfs, "/") == 0 && become_first_process() == 0);
+    upstream_policy_start();
     owner = current;
     extern __thread volatile sig_atomic_t in_jit;
     bool jit = !strncmp(argv[1], "jit-", 4);
@@ -123,5 +125,6 @@ int main(int argc, char **argv) {
     assert(pt_unmap_always(current->mem, 0, MEM_PAGES) == 0);
     write_wrunlock(&current->mem->lock);
     assert(atomic_load(&anon_page_count) == 0);
+    upstream_policy_empty();
     puts("memory-upgrade-revalidation-ok");
 }

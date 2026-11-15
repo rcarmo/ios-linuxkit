@@ -158,6 +158,7 @@ hosts and guests named in each report.
 | [Linux development](docs/LINUX_DEVELOPMENT.md) | Building, fakefs creation, command-line use and diagnostics. |
 | [iOS application](docs/IOS_APPLICATION.md) | Xcode schemes, rootfs packaging and host integration. |
 | [Linux AOT](docs/NATIVE_AOT_BUILD_PLAN.md) | Recording, linking, running, testing and measuring local AOT. |
+| [Memory admission](docs/MEMORY_ADMISSION.md) | Default-off portable tickets, opt-in Linux pressure sampling, and deferred platform adapters. |
 | [Native offload](docs/NATIVE_OFFLOAD.md) | Legacy/cooperative contracts, guest VFS, bounded streams and output policy. |
 | [Route-netlink and Tailscale](docs/NETLINK_TAILSCALE.md) | Opt-in host interface discovery and isolated userspace networking tests. |
 | [AOT artifacts](docs/NATIVE_AOT_ARTIFACT_KIT.md) | Freezing, restoring, validating and publishing reusable inputs/builds. |

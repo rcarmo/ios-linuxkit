@@ -17,7 +17,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define PATH "/tmp/open_unlink_race"
+// Independent emulator instances must not race through fakefs metadata owned
+// by another test invocation. Each run still has eight contending workers.
+static char path[128];
+#define PATH path
 #define WORKERS 8
 #define ITERS 3000
 
@@ -41,6 +44,9 @@ static int worker(void) {
 }
 
 int main(void) {
+    char directory[] = "/tmp/ish-open-unlink-XXXXXX";
+    if (!mkdtemp(directory)) { perror("mkdtemp"); return 1; }
+    snprintf(path, sizeof(path), "%s/file", directory);
     int fd = open(PATH, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) { perror("create"); return 1; }
     write(fd, "x", 1); close(fd);
@@ -60,6 +66,7 @@ int main(void) {
         if (!WIFEXITED(st) || WEXITSTATUS(st)) fails++;
     }
     unlink(PATH);
+    rmdir(directory);
     printf("open_unlink_race: %d/%d workers clean\n", WORKERS - fails, WORKERS);
     return fails ? 1 : 0;
 }

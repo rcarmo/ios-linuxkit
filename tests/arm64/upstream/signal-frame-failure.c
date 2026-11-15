@@ -1,4 +1,4 @@
-// Actual signal delivery and stack materialization, no memory-policy API.
+// Actual signal delivery/stack materialization, optional test admission.
 #include <assert.h>
 #include <errno.h>
 #include <setjmp.h>
@@ -10,6 +10,7 @@
 #include "kernel/calls.h"
 #include "kernel/signal.h"
 #include "fs/real.h"
+#include "policy-test.h"
 static jmp_buf exited;
 static int injection;
 static unsigned failures;
@@ -36,11 +37,9 @@ noreturn void __wrap_do_exit_group(int status) {
     assert(atomic_load(&anon_page_count) == initial_pages && failures == 1);
     longjmp(exited, 1);
 }
-int main(int argc, char **argv) {
-    assert(argc == 2);
-    int kind = !strcmp(argv[1], "mmap") ? 1 : !strcmp(argv[1], "data") ? 2 : 0;
-    assert(kind || !strcmp(argv[1], "recover"));
+static void run_delivery(volatile int kind) {
     assert(mount_root(&realfs, "/") == 0 && become_first_process() == 0);
+    upstream_policy_start();
     write_wrlock(&current->mem->lock);
     assert(pt_unmap_always(current->mem, 0, MEM_PAGES) == 0);
     assert(pt_map_nothing(current->mem, STACK_INIT_PAGE, 1, P_READ | P_WRITE | P_GROWSDOWN) == 0);
@@ -54,6 +53,7 @@ int main(int argc, char **argv) {
     initial_pages = atomic_load(&anon_page_count);
     send_signal(current, SIGUSR1_, SIGINFO_NIL);
     injection = kind;
+    if (kind == 3) { ish_memory_policy_invalidate(); failures = 1; }
     if (setjmp(exited) == 0) {
         receive_signals();
         assert(!kind && current->cpu.pc == 0x500000 && current->cpu.sp < initial_sp);
@@ -68,4 +68,11 @@ int main(int argc, char **argv) {
     assert(pt_unmap_always(current->mem, 0, MEM_PAGES) == 0);
     write_wrunlock(&current->mem->lock);
     assert(atomic_load(&anon_page_count) == 0);
+    upstream_policy_empty();
+}
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    int kind = !strcmp(argv[1], "mmap") ? 1 : !strcmp(argv[1], "data") ? 2 : !strcmp(argv[1], "policy") ? 3 : 0;
+    assert(kind || !strcmp(argv[1], "recover"));
+    run_delivery(kind);
 }
