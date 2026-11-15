@@ -84,13 +84,34 @@ def seg_label(t, s):
     return f'Lt{t}s{s}'
 
 
-def emit_segment(out, syms, t, s, seg, stats):
+def validate_stub_relocs(header, trans):
+    stubs = header.get('stubs', [])
+    if not isinstance(stubs, list) or len(stubs) > 3:
+        sys.exit('invalid shared stub header')
+    for seg in stubs + [s for t in trans for s in t['segs']]:
+        for rel in seg['rel']:
+            if not isinstance(rel, list) or len(rel) < 2 or type(rel[0]) is not int or rel[0] < 0 or ('words' in seg and rel[0] >= len(seg['words'])):
+                sys.exit('invalid relocation position')
+            if rel[1] == 'stub' and (len(rel) != 3 or type(rel[2]) is not int or not 1 <= rel[2] <= len(stubs)):
+                sys.exit('invalid or missing shared stub relocation')
+            if rel[1] == 'sym' and (len(rel) != 3 or not isinstance(rel[2], str)):
+                sys.exit('invalid symbol relocation')
+            if rel[1] == 'exit' and len(rel) != 2:
+                sys.exit('invalid exit relocation')
+            if rel[1] not in ('sym', 'exit', 'stub'):
+                sys.exit('unknown relocation kind')
+
+
+def emit_segment(out, syms, t, s, seg, stats, label=None):
     words = seg['words']
     special = {}
     for rel in seg['rel']:
         at, kind = rel[0], rel[1]
         if kind == 'exit':
-            special[at] = ('exit',)
+            special[at] = ('stub', 'Laot_exit_stub')
+            continue
+        if kind == 'stub':
+            special[at] = ('stub', f'Laot_stub_{rel[2]}')
             continue
         target = link_name(syms, rel[2])
         if target is None:
@@ -100,7 +121,7 @@ def emit_segment(out, syms, t, s, seg, stats):
         special[at] = ('link', slot, tt, ts, tw)
 
     out.append('    .p2align 4')
-    out.append(f'{seg_label(t, s)}:')
+    out.append(f'{label or seg_label(t, s)}:')
     i = 0
     while i < len(words):
         sp = special.get(i)
@@ -108,8 +129,8 @@ def emit_segment(out, syms, t, s, seg, stats):
             out.append(f'    .inst 0x{words[i]:08x}')
             i += 1
             continue
-        if sp[0] == 'exit':
-            out.append('    b Laot_exit_stub')
+        if sp[0] == 'stub':
+            out.append(f'    b {sp[1]}')
             stats['exit'] += 1
             i += 1
             continue
@@ -273,6 +294,7 @@ def main():
     if len(mods) != 1:
         sys.exit(f"❌ expected one module in the recording, got {sorted(mods)}")
     mod = mods.pop()
+    validate_stub_relocs(header, trans)
     mod_file = os.path.join(args.rootfs, mod.lstrip('/'))
     if not os.path.isfile(mod_file):
         sys.exit(f"❌ {mod_file}: module not found in the rootfs")
@@ -282,7 +304,7 @@ def main():
     kept = range(len(trans))
     if args.keep:
         hot = {int(x, 0) for x in open(args.keep).read().split()}
-        kept = [i for i, t in enumerate(trans) if hot & set(segment_offsets(t))]
+        kept = [i for i, t in enumerate(trans) if t['off'] in hot or hot & set(segment_offsets(t))]
         print(f"✂️  keeping {len(kept)} of {len(trans)} translations ({len(hot)} hot offsets)")
     # Stable order: by file offset (the loader binary-searches it), then key.
     order = sorted(kept, key=lambda i: (trans[i]['off'], trans[i]['key']))
@@ -312,6 +334,8 @@ def main():
     if dropped:
         sys.exit(f"❌ {len(dropped)} translations reference unnamed host addresses (first: {trans[min(dropped)]['off']:#x})")
 
+    if not trans:
+        sys.exit('profile selection kept no translations')
     exit_stub = header['exit_stub']
     data = []
     for ti, t in enumerate(trans):
@@ -355,6 +379,9 @@ def main():
              'Laot_text_start:',
              'Laot_exit_stub:']
     lines += [f'    .inst 0x{w:08x}' for w in exit_stub]
+    for i, stub in enumerate(header.get('stubs', []), 1):
+        if not emit_segment(lines, syms, 0, 0, dict(stub, links=[]), stats, f'Laot_stub_{i}'):
+            sys.exit(f'stub {i} references an unnamed host address')
     lines += code
     lines += ['    .p2align 2', 'Laot_text_end:', '', '    .section __DATA,__const']
     lines += data

@@ -24,6 +24,7 @@ static void mem_changed(struct mem *mem);
 static struct mmu_ops mem_mmu_ops;
 
 #include "kernel/mm.h"
+#include "emu/tlb.h"
 
 static void reacquire_read_after_failed_jit_upgrade(wrlock_t *lock) {
     // glibc rwlocks are writer-preferred in util/sync.h. If a JIT thread
@@ -48,6 +49,10 @@ void mem_init(struct mem *mem) {
     mem->mmu.ops = &mem_mmu_ops;
     mem->mmu.asbestos = asbestos_new(&mem->mmu);
     mem->mmu.changes = 0;
+#ifdef GUEST_ARM64
+    lock_init(&mem->mmu.tlbs_lock);
+    list_init(&mem->mmu.tlbs);
+#endif
     wrlock_init(&mem->lock);
     lock_init(&mem->cow_lock);
 }
@@ -222,6 +227,11 @@ void mem_destroy(struct mem *mem) {
     mem->pgdir = NULL;
     write_wrunlock(&mem->lock);
     wrlock_destroy(&mem->lock);
+#ifdef GUEST_ARM64
+    // All guest quanta/cleanup detach before their final mm_release.
+    assert(list_empty(&mem->mmu.tlbs));
+    pthread_mutex_destroy(&mem->mmu.tlbs_lock.m);
+#endif
 }
 
 // Navigate 4-level page table to find L3 entry, creating intermediate nodes as needed
@@ -709,7 +719,10 @@ int pt_copy_on_write(struct mem *src, struct mem *dst, page_t start, page_t page
 }
 
 static void mem_changed(struct mem *mem) {
-    __atomic_add_fetch(&mem->mmu.changes, 1, __ATOMIC_RELEASE);
+    __atomic_add_fetch(&mem->mmu.changes, 1, __ATOMIC_SEQ_CST);
+#ifdef GUEST_ARM64
+    mmu_tlbs_stale(&mem->mmu);
+#endif
 }
 
 // Public wrapper: bump the memory-change generation so other threads' TLB

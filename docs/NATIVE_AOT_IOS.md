@@ -71,8 +71,10 @@ Do not re-label Bun 1.4.2 recordings, images or benchmark results as 1.4.4;
 dated reports retain their original versions and observations.
 
 The [15 November Linux audit](reports/audits/CRATE_OPENMINIS_2026-11-15.md)
-records a passing fresh Bun 1.4.4 five-image no-emitter gate with gadget-mode
-workload parity. It does not validate an Apple target layout, signed app or
+records the initial fresh Bun 1.4.4 five-image no-emitter gate with gadget-mode
+workload parity. The [follow-up implementation report](reports/audits/OPENMINIS_COMPLETION_2026-11-15.md)
+records fresh ABI-15 images after shared slow paths and TLB layout changes;
+older ABI-13 images must be regenerated, not relabelled. It does not validate an Apple target layout, signed app or
 physical device. Recordings now default to the selected module only, and
 exhausted arenas are rejected; use the existing Go compiler shards when needed.
 

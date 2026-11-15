@@ -154,9 +154,11 @@ int create_stdio(const char *file, int major, int minor) {
     }
 
     fd->refcount = 0;
-    current->files->files[0] = fd_retain(fd);
-    current->files->files[1] = fd_retain(fd);
-    current->files->files[2] = fd_retain(fd);
+    // Initial publications have the same generation identity as later installs.
+    for (unsigned i = 0; i < 3; i++) {
+        current->files->files[i] = fd_retain(fd);
+        current->files->generation[i]++;
+    }
     return 0;
 }
 
@@ -194,14 +196,11 @@ static struct fd *open_fd_from_actual_fd(int fd_no) {
 }
 
 int create_piped_stdio() {
-    if (!(current->files->files[0] = open_fd_from_actual_fd(STDIN_FILENO))) {
-        return -1;
-    }
-    if (!(current->files->files[1] = open_fd_from_actual_fd(STDOUT_FILENO))) {
-        return -1;
-    }
-    if (!(current->files->files[2] = open_fd_from_actual_fd(STDERR_FILENO))) {
-        return -1;
+    for (unsigned i = 0; i < 3; i++) {
+        struct fd *fd = open_fd_from_actual_fd(i);
+        if (!fd) return -1;
+        current->files->files[i] = fd;
+        current->files->generation[i]++;
     }
     return 0;
 }

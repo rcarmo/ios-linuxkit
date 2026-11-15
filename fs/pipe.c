@@ -5,15 +5,18 @@
 #include "fs/real.h"
 #include "debug.h"
 
-static fd_t pipe_f_create(int pipe_fd, int flags) {
+// Consumes pipe_fd on every path. Keep an owner until publication completes.
+static struct fd *pipe_f_alloc(int pipe_fd) {
     struct fd *fd = adhoc_fd_create(&realfs_fdops);
-    if (fd == NULL)
-        return _ENOMEM;
+    if (fd == NULL) {
+        close(pipe_fd);
+        return ERR_PTR(_ENOMEM);
+    }
     fd->real_fd = pipe_fd;
     fd->stat.mode = S_IFIFO | 0660;
     fd->stat.uid = current->uid;
     fd->stat.gid = current->gid;
-    return f_install(fd, flags);
+    return fd;
 }
 
 int_t sys_pipe2(addr_t pipe_addr, int_t flags) {
@@ -26,29 +29,32 @@ int_t sys_pipe2(addr_t pipe_addr, int_t flags) {
     int p[2];
     int err = pipe(p);
     if (err < 0)
-        return err;
+        return errno_map();
 
+    struct fd *ends[2];
+    ends[0] = pipe_f_alloc(p[0]);
+    if (IS_ERR(ends[0])) { close(p[1]); return PTR_ERR(ends[0]); }
+    ends[1] = pipe_f_alloc(p[1]);
+    if (IS_ERR(ends[1])) { fd_close(ends[0]); return PTR_ERR(ends[1]); }
     int fp[2];
-    err = fp[0] = pipe_f_create(p[0], flags);
-    if (fp[0] < 0)
-        goto close_pipe;
-    err = fp[1] = pipe_f_create(p[1], flags);
-    if (fp[1] < 0)
-        goto close_fake_0;
-
+    struct fd_install_token tokens[2] = {};
+    err = fp[0] = f_install_owned(fd_retain(ends[0]), flags, &tokens[0]);
+    if (fp[0] < 0) goto out_refs;
+    err = fp[1] = f_install_owned(fd_retain(ends[1]), flags, &tokens[1]);
+    if (fp[1] < 0) goto close_fake_0;
     err = _EFAULT;
-    if (user_put(pipe_addr, fp))
-        goto close_fake_1;
+    if (user_put(pipe_addr, fp)) goto close_fake_1;
     STRACE(" [%d %d]", fp[0], fp[1]);
-    return 0;
-
+    err = 0;
+    goto out_refs;
 close_fake_1:
-    f_close(fp[1]);
+    f_uninstall(&tokens[1]);
 close_fake_0:
-    f_close(fp[0]);
-close_pipe:
-    close(p[0]);
-    close(p[1]);
+    f_uninstall(&tokens[0]);
+out_refs:
+    f_install_release(&tokens[0]);
+    f_install_release(&tokens[1]);
+    fd_close(ends[0]); fd_close(ends[1]);
     return err;
 }
 

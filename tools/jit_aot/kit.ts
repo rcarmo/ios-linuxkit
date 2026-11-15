@@ -106,6 +106,22 @@ async function restore(seed:string,out:string) {
 }
 export function definedSymbols(nm:string){const all=new Set(nm.split('\n').map(x=>x.trim().split(/\s+/)).filter(x=>x.length===3&&/^[0-9a-fA-F]+$/.test(x[0])&&/^[A-TV-Z]$/.test(x[1])).map(x=>x[2]));const map=new Map<string,string>();for(const n of all)map.set(n.startsWith('_')?n.slice(1):n,n);for(const n of all)if(!n.startsWith('_'))map.set(n,n);return map;}
 function symbols(binary:string){return definedSymbols(checked(['nm','-g',binary]));}
+// Stub IDs are local branch targets, not host symbol names. Validate the
+// complete header too: its shared paths can introduce additional symbols.
+export function recordingSymbols(header:any, rows:any[]) {
+ const stubs=header?.stubs ?? [];
+ if(!Array.isArray(stubs)||stubs.length>3)throw Error('invalid shared stub header');
+ const required=new Set<string>(['ish_aot_register']);
+ for(const row of rows)for(const name of Object.values(row.keysym||{}))required.add(name as string);
+ for(const seg of [...stubs,...rows.flatMap(row=>row.segs)])for(const rel of seg.rel) {
+  if(!Array.isArray(rel)||!Number.isInteger(rel[0])||rel[0]<0||(seg.words && rel[0]>=seg.words.length))throw Error('invalid relocation position');
+  if(rel[1]==='sym') {if(rel.length!==3||typeof rel[2]!=='string')throw Error('invalid symbol relocation');required.add(rel[2]);}
+  else if(rel[1]==='stub') {if(rel.length!==3||!Number.isInteger(rel[2])||rel[2]<1||rel[2]>stubs.length)throw Error('invalid or missing shared stub relocation');}
+  else if(rel[1]!=='exit')throw Error('unknown relocation kind');
+  else if(rel.length!==2)throw Error('invalid exit relocation');
+ }
+ return required;
+}
 export function requireAppleBinary(bytes:Uint8Array,platform:string){const d=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);if(bytes.length<32||d.getUint32(0,true)!==0xfeedfacf||d.getUint32(4,true)!==0x0100000c||!['ios','ios-simulator','macos'].includes(platform))throw Error('requires thin Mach-O ARM64 target and explicit Apple platform; ELF/fat binaries rejected');}
 export function matchContract(header:any, contract:any, binaryHash:string) {
  for(const k of ['abi','prologue_words','entry_off','n_pinned'])if(contract[k]!==header[k])throw Error(`target contract mismatch: ${k}`);
@@ -131,8 +147,9 @@ async function generate(seed:string,out:string,format:string,symbolBinary?:strin
  if(format==='macho')requireAppleBinary(readFileSync(target).subarray(0,32),c.platform);
  const checks=[];
  for(const name of moduleNames(m.modules)){
-  const rec=join(seed,'recordings',name+'.jsonl');let header:any;const required=new Set<string>(['ish_aot_register']);
-  for await(const line of createInterface({input:createReadStream(rec),crlfDelay:Infinity})) {const t=JSON.parse(line);if(t.header){header=t.header;continue;}for(const n of Object.values(t.keysym||{}))required.add(n as string);for(const seg of t.segs)for(const rel of seg.rel)if(rel[1]!=='exit')required.add(rel[2]);}
+  const rec=join(seed,'recordings',name+'.jsonl');let header:any;const rows:any[]=[];
+  for await(const line of createInterface({input:createReadStream(rec),crlfDelay:Infinity})) {const t=JSON.parse(line);if(t.header){header=t.header;continue;}rows.push(t);}
+  const required=recordingSymbols(header,rows);
   if(c)matchContract(header,c,await sha(target));
   for(const n of required)if(n!=='@region'&&!syms.has(n))throw Error(`unresolved target symbol: ${n}`);
   checked(['python3',join(project,'tools/jit_aot/gen.py'),rec,target,root,join(s,`aot_${name}.S`),'--name',name,'--format',format,'--family',''],join(s,name+'.log'));

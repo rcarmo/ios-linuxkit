@@ -261,7 +261,11 @@ static const uint8_t lazy_pool[] = {16, 17, 0};
 static const uint8_t pool_nopin[] = {0, 3, 4, 5, 6, 7, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27};
 static int n_pinned;               // 0 when pinning is off
 static int prologue_words;          // cold-entry prologue length (hot entry offset)
-static uintptr_t exit_stub;         // shared: store pinned registers; br x8
+// Plain branches to shared PIC slow paths; images carry their own copies.
+enum { STUB_EXIT, STUB_GENERIC, STUB_POKE, STUB_UNCH, NSTUBS };
+static uintptr_t stubs[NSTUBS];
+static struct rec_seg *stub_rec[NSTUBS];
+#define exit_stub stubs[STUB_EXIT]
 static unsigned exit_stub_words;
 static int8_t pin_of[33];          // guest -> host register, -1 if not pinned
 
@@ -305,7 +309,7 @@ struct em {
     uint32_t locked;       // host registers used by the instruction being emitted
     uint8_t victim;        // round-robin eviction cursor
     // bailout / exit sites: branch at buf[at] must go to the stub for stream position spos
-    struct { unsigned at; unsigned spos; uint8_t kind; uintptr_t abs; } fix[1024];
+    struct { unsigned at; unsigned spos; uint8_t kind, stub; uintptr_t abs; } fix[1024];
     unsigned nfix;
     bool fail;
     bool hflags;   // host NZCV currently equals the guest flags
@@ -609,6 +613,8 @@ static void make_exit_stub(void) {
         stub[n++] = 0xB9000000u | ((CPU_cycle / 4) << 10) | (1u << 5) | H_CYC;   // str w15, [x1, #cycle]
     stub[n++] = 0xD61F0100u;   // br x8
     uint8_t *dst = region_alloc(n * 4);
+    if (!dst)
+        return;
     install_code(dst, stub, n);
     exit_stub = (uintptr_t) dst;
     exit_stub_words = n;
@@ -616,11 +622,16 @@ static void make_exit_stub(void) {
 
 // Leave native code for `target` (gadget, fiber_ret, ...): x8 = target, then
 // the shared exit stub stores the pinned registers and branches to x8.
-static void emit_exit_x8(struct em *e) {
-    if (e->nfix == 1024) { e->fail = true; return; }
-    e->fix[e->nfix].at = e->n; e->fix[e->nfix].spos = 0; e->fix[e->nfix].kind = 4; e->fix[e->nfix].abs = exit_stub;
+static void emit_to_stub(struct em *e, unsigned id) {
+    if (id >= NSTUBS || !stubs[id] || e->nfix == 1024) { e->fail = true; return; }
+    e->fix[e->nfix].at = e->n; e->fix[e->nfix].spos = 0; e->fix[e->nfix].kind = 4;
+    e->fix[e->nfix].stub = (uint8_t) id; e->fix[e->nfix].abs = stubs[id];
     e->nfix++;
-    put(e, 0x14000000u);                                           // b exit_stub (patched)
+    put(e, 0x14000000u);                                           // b stub (patched)
+}
+
+static void emit_exit_x8(struct em *e) {
+    emit_to_stub(e, STUB_EXIT);
 }
 
 static void set_last_block(struct em *e, struct fiber_block *b) {
@@ -721,13 +732,13 @@ static void tlb_lookup(struct em *e, unsigned bytes, bool write, unsigned spos) 
     put(e, 0x8B000000u | (2u << 16) | (T_I << 5) | T_I);       // add x10, x10, x2
     unsigned pg = write ? offsetof(struct tlb_entry, page_if_writable) : offsetof(struct tlb_entry, page);
     put(e, 0xF9400000u | ((pg / 8) << 10) | (T_I << 5) | T_E); // ldr x11, [x10, #page]
+    // OR bit 48 into the comparison page when mappings have changed.
+    int stale_off = (int) offsetof(struct tlb, stale) - (int) offsetof(struct tlb, entries);
+    _Static_assert(offsetof(struct tlb, entries) - offsetof(struct tlb, stale) <= 256,
+                   "TLB stale LDUR range");
+    put(e, 0xF8400000u | ((uint32_t) (stale_off & 0x1ff) << 12) | (2u << 5) | T_Q); // ldur x12, [x2, #stale]
+    put(e, 0xAA000000u | (T_Q << 16) | (T_P << 5) | T_P);     // orr x8, x8, x12
     put(e, 0xEB00001Fu | (T_E << 16) | (T_P << 5));            // cmp x8, x11
-    branch_stub(e, spos, 1);                                   // b.ne stub
-    put(e, 0xF9400000u | ((offsetof(struct tlb_entry, gen) / 8) << 10) | (T_I << 5) | T_E);  // ldr x11, [x10, #gen]
-    int mmu_off = (int) offsetof(struct tlb, mmu) - (int) offsetof(struct tlb, entries);
-    put(e, 0xF8400000u | ((uint32_t) (mmu_off & 0x1ff) << 12) | (2u << 5) | T_Q);             // ldur x12, [x2, #mmu]
-    put(e, 0xF9400000u | ((offsetof(struct mmu, changes) / 8) << 10) | (T_Q << 5) | T_Q);    // ldr x12, [x12, #changes]
-    put(e, 0xEB00001Fu | (T_Q << 16) | (T_E << 5));            // cmp x11, x12
     branch_stub(e, spos, 1);                                   // b.ne stub
     put(e, 0xF9400000u | ((offsetof(struct tlb_entry, data_minus_addr) / 8) << 10) | (T_I << 5) | T_E);  // ldr x11, [x10, #dma]
     put(e, 0x8B000000u | (T_A << 16) | (T_E << 5) | T_A);      // add x9, x11, x9
@@ -936,7 +947,7 @@ static bool emit_ldst_fp(struct em *e, uint32_t x, unsigned spos) {
         unsigned opc = x >> 30, L = (x >> 22) & 1, idx = (x >> 23) & 3;
         if (opc == 3 || idx == 0) return false;                               // no-allocate pair: rare
         unsigned scale = 2 + opc;
-        int64_t imm = sext((x >> 15) & 0x7f, 7) << scale;
+        int64_t imm = sext((x >> 15) & 0x7f, 7) * (int64_t) (1u << scale);
         int rt = x & 31, rt2 = (x >> 10) & 31, rn = (x >> 5) & 31;
         if (imm < -4095 || imm > 4095) return false;
         int gn = rn == 31 ? G_SP : rn;
@@ -984,7 +995,7 @@ static bool emit_ldst(struct em *e, uint32_t x, unsigned spos) {
         unsigned opc = x >> 30, L = (x >> 22) & 1, idx = (x >> 23) & 3;
         if (opc == 3 || (opc == 1 && !L)) return false;
         unsigned scale = opc == 2 ? 3 : 2;
-        int64_t imm = sext((x >> 15) & 0x7f, 7) << scale;
+        int64_t imm = sext((x >> 15) & 0x7f, 7) * (int64_t) (1u << scale);
         int rt = x & 31, rt2 = (x >> 10) & 31, rn = (x >> 5) & 31;
         bool wb = idx == 1 || idx == 3;
         if (wb && ((rn == rt && rt != 31) || (rn == rt2 && rt2 != 31))) return false;
@@ -1240,7 +1251,7 @@ static uint8_t *finish_native(struct em *e, struct fiber_block *b, uintptr_t ori
             if (e->record) {
                 unsigned n = e->n;
                 e->n = e->fix[i].at;
-                add_rel(e, REL_EXIT, 0);
+                add_rel(e, REL_EXIT, e->fix[i].stub);
                 e->n = n;
                 if (e->fail) return NULL;
             }
@@ -1467,7 +1478,118 @@ static void emit_native_dispatch_ex(struct em *e, bool block_start) {
 // swaps them back first.
 static void emit_refused_edge(struct em *e, unsigned generic, int link);
 
+// Publish only a stub with a complete recording, so allocation failure leaves
+// block ends inline rather than exporting branches to missing header code.
+static void install_stub(struct em *e, unsigned id) {
+    uint8_t *dst = e->fail ? NULL : region_alloc(e->n * 4);
+    if (!dst) return;
+    for (unsigned i = 0; i < e->nfix; i++) {
+        int64_t d = (int64_t) e->fix[i].abs - (int64_t) ((uintptr_t) dst + 4 * e->fix[i].at);
+        if (e->fix[i].kind != 4 || !e->fix[i].abs || !fits(d >> 2, 26)) return;
+        e->buf[e->fix[i].at] = ENC_B(d);
+        unsigned n = e->n;
+        e->n = e->fix[i].at;
+        add_rel(e, REL_EXIT, e->fix[i].stub);
+        e->n = n;
+    }
+    if (e->fail) return;
+    struct rec_seg *rec = record_segment(e);
+    if (!rec) return;
+    install_code(dst, e->buf, e->n);
+    stub_rec[id] = rec;
+    stubs[id] = (uintptr_t) dst;
+}
+
+static void make_stubs(void) {
+    struct em *e = calloc(1, sizeof(*e));
+    if (!e) return;
+    int ne = (int) offsetof(struct fiber_block, native_entry) - FIBER_BLOCK_code;
+    int boff = FIBER_BLOCK_addr - FIBER_BLOCK_code;
+    for (unsigned id = STUB_GENERIC; id < NSTUBS; id++) {
+        memset(e, 0, sizeof(*e));
+        e->link_at[0] = e->link_at[1] = -1;
+        if (id == STUB_GENERIC) {
+            put(e, 0xF8400000u | ((uint32_t) (ne & 0x1ff) << 12) | (9u << 5) | 8);
+            unsigned slow = e->n; put(e, 0xB4000008u);
+            enter_native(e);
+            patch_here(e, slow);
+            put(e, 0xF8400000u | ((uint32_t) (boff & 0x1ff) << 12) | (9u << 5) | 11);
+            put(e, 0xF9000000u | ((CPU_pc / 8) << 10) | (1u << 5) | 11);
+            put(e, 0xAA0903FCu); // mov x28, x9
+            // Keep our explicit native-entry/gadget check, never a region range test.
+            emit_native_dispatch_ex(e, true);
+        } else if (id == STUB_POKE) {
+            put(e, 0xF8400000u | ((uint32_t) (boff & 0x1ff) << 12) | (9u << 5) | 11);
+            put(e, 0xF9000000u | ((CPU_pc / 8) << 10) | (1u << 5) | 11);
+            put(e, 0xD1000000u | (FIBER_BLOCK_code << 10) | (9u << 5) | 8);
+            put(e, 0xF9000000u | ((LOCAL_last_block / 8) << 10) | (1u << 5) | 8);
+            put(e, 0xAA0903FCu);
+            emit_exit(e, (uintptr_t) jit_fiber_ret);
+        } else {
+            // x9 = unchained slot; w10 = idx << 2 | link (2: no alternate).
+            put(e, 0x1200054Bu); // and w11, w10, #3
+            put(e, 0x7100097Fu); // cmp w11, #2
+            unsigned plain1 = e->n; put(e, 0x54000000u);
+            unsigned plain2 = e->n; put(e, 0xB6F00009u); // tbz x9, #62
+            put(e, 0x53027D4Cu); // lsr w12, w10, #2
+            put(e, 0x8B0C058Cu); // add x12, x12, x12, lsl #1
+            put(e, 0xCB0C0FACu); // sub x12, x29, x12, lsl #3
+            put(e, 0x8B0B0D8Cu); // add x12, x12, x11, lsl #3
+            put(e, 0xF8400000u | ((uint32_t) ((int) offsetof(struct jit_far, alt) - CTX_FAR) & 0x1ff) << 12
+                   | (12u << 5) | 12);
+            unsigned plain3 = e->n; put(e, 0xB400000Cu);
+            put(e, 0xAA0C03E9u); // mov x9, x12
+            emit_to_stub(e, STUB_GENERIC);
+            patch_here(e, plain1); patch_here(e, plain2); patch_here(e, plain3);
+            put(e, 0x53027D4Cu);
+            put(e, 0x8B0C13ACu); // add x12, x29, x12, lsl #4
+            put(e, 0xF9400000u | ((CTX_BLK / 8) << 10) | (12u << 5) | 8);
+            put(e, 0xF9000000u | ((LOCAL_last_block / 8) << 10) | (1u << 5) | 8);
+            put(e, 0x9240BC00u | (9u << 5) | 11);
+            put(e, 0xF9000000u | ((CPU_pc / 8) << 10) | (1u << 5) | 11);
+            put(e, 0xAA0903FCu);
+            emit_exit(e, (uintptr_t) jit_fiber_ret_chain);
+        }
+        install_stub(e, id);
+        if (!stubs[id]) break;
+    }
+    free(e);
+}
+
+static void emit_unch_payload(struct em *e, int link) {
+    uint32_t p = e->idx << 2 | (link >= 0 && link < 2 ? (uint32_t) link : 2u);
+    put(e, 0x5280000Au | (p & 0xffff) << 5);
+    if (p >> 16) put(e, 0x72A0000Au | (p >> 16) << 5);
+    emit_to_stub(e, STUB_UNCH);
+}
+
+static void emit_chain_outlined(struct em *e, struct fiber_block *b, unsigned long *slot, int link) {
+    // Preserve our count-before-slot semantics, including unchained edges.
+    put(e, 0x110005EFu);
+    put(e, 0x720025FFu);
+    ldr_block(e, 9, (unsigned) ((char *) slot - (char *) b));
+    unsigned to_poke = e->n; put(e, 0x54000000u);
+    unsigned to_unch = e->n; put(e, 0xB7F80009u);
+    if (!(e->n & 1)) put(e, NOP);
+    unsigned site = e->n; put(e, 0x14000000u);
+    if (link >= 0 && link < 2) e->link_at[link] = (int) site;
+    put(e, LINK_UNSET); put(e, 0);
+    patch_here(e, site);
+    emit_to_stub(e, STUB_GENERIC);
+    patch_here(e, to_unch);
+    emit_unch_payload(e, link);
+    patch_here(e, to_poke);
+    unsigned poke_unch = e->n; put(e, 0xB7F80009u);
+    emit_to_stub(e, STUB_POKE);
+    patch_here(e, poke_unch);
+    emit_unch_payload(e, -1); // timer wrap never enters a refused alternate
+}
+
 static void emit_chain_ex(struct em *e, struct fiber_block *b, unsigned long *slot, int link, bool self_loop) {
+    if (pic_on && n_pinned && !self_loop && stubs[STUB_UNCH]) {
+        emit_chain_outlined(e, b, slot, link);
+        return;
+    }
     bool reg_cycle = n_pinned > 0;
     unsigned generic = 0;   // PIC: chained successor in x9, entered natively or through its gadgets
     unsigned slot_off = (unsigned) ((char *) slot - (char *) b);
@@ -2253,7 +2375,7 @@ void ish_aot_register(const struct aot_module *m) {
 
 // Bump whenever the code emitted for some guest instruction, stub or exit
 // changes: images made before would still pass every other check.
-#define JIT_CODE_VERSION 13
+#define JIT_CODE_VERSION 15
 
 // Everything the emitted code bakes in besides the gadgets it names: the
 // conventions, the struct layouts it loads from and the TLB / block cache
@@ -2272,7 +2394,8 @@ static uint32_t jit_abi(void) {
         offsetof(struct fiber_frame, native_fault_addr), offsetof(struct fiber_frame, native_fault_write),
         sizeof(struct tlb_entry), offsetof(struct tlb_entry, page), offsetof(struct tlb_entry, page_if_writable),
         offsetof(struct tlb_entry, gen), offsetof(struct tlb_entry, data_minus_addr), TLB_BITS, PAGE_BITS,
-        offsetof(struct tlb, entries), offsetof(struct tlb, mmu), offsetof(struct tlb, block_cache_gen),
+        offsetof(struct tlb, entries), offsetof(struct tlb, mmu), offsetof(struct tlb, stale),
+        offsetof(struct tlb, block_cache_gen),
         offsetof(struct tlb, block_cache), sizeof(((struct tlb *) 0)->block_cache),
         offsetof(struct mmu, changes), offsetof(struct mmu, asbestos), offsetof(struct asbestos, invalidate_gen),
         sizeof(struct aot_module), sizeof(struct aot_trans),
@@ -3027,6 +3150,21 @@ static int jit_locate(addr_t pc, uint64_t *off, uint64_t *base) {
     return mod;
 }
 
+int jit_prof_locate(struct tlb *tlb, addr_t pc, uint64_t *off) {
+    struct tlb *saved = cm_tlb;
+    cm_tlb = tlb;
+    uint64_t base;
+    int mod = jit_locate(pc, off, &base);
+    cm_tlb = saved;
+    return mod;
+}
+
+void jit_module_path(int mod, char *buf, size_t size) {
+    pthread_mutex_lock(&cm_lock);
+    snprintf(buf, size, "%s", (unsigned) mod < cm_nmods ? cm_mods[mod].path : "?");
+    pthread_mutex_unlock(&cm_lock);
+}
+
 // Was image m recorded from this module (IMG_SAME: by build-id when both have
 // one, the same build anywhere in the file system, else by path), or from
 // another version of it (IMG_FAMILY: the file name matches the image's
@@ -3062,7 +3200,7 @@ static bool module_path_has(int mod, const char *sub) {
 // ---- ISH_JIT_RECORD: one JSON object per translation
 //   {"mod", "off", "idx", "key": [...], "keysym": {"i": "sym"}, "segs": [
 //     {"pos", "code" (host address), "words": [...],
-//      "rel": [[at, "sym", name] | [at, "exit"]],
+//      "rel": [[at, "sym", name] | [at, "exit"] | [at, "stub", id]],
 //      "links": [[slot, at, target translation | -1, target segment, target word]],
 //      "loop": [head, end, [promoted], [donors], [host regs]] | null}]}
 // Host addresses become symbol names (gadgets, fiber_ret, ...; "@region" for
@@ -3078,6 +3216,21 @@ static void rec_sym(FILE *f, uintptr_t p) {
         fprintf(f, "\"%s+%lu\"", info.dli_sname, (unsigned long) (p - (uintptr_t) info.dli_saddr));
     } else {
         fprintf(f, "\"?%lx\"", (unsigned long) p);
+    }
+}
+
+static void rec_rels(FILE *f, const struct rec_seg *rs) {
+    for (unsigned j = 0; j < rs->nrel; j++) {
+        fprintf(f, "%s[%u, ", j ? ", " : "", rs->rel[j].at);
+        if (rs->rel[j].kind == REL_EXIT && rs->rel[j].val == STUB_EXIT)
+            fprintf(f, "\"exit\"]");
+        else if (rs->rel[j].kind == REL_EXIT)
+            fprintf(f, "\"stub\", %lu]", (unsigned long) rs->rel[j].val);
+        else {
+            fprintf(f, "\"sym\", ");
+            rec_sym(f, rs->rel[j].val);
+            fprintf(f, "]");
+        }
     }
 }
 
@@ -3118,6 +3271,16 @@ static void rec_write(const char *path) {
             jit_abi(), prologue_words, (unsigned long) entry_off(), n_pinned);
     for (unsigned i = 0; i < exit_stub_words; i++)
         fprintf(f, "%s%u", i ? ", " : "", ((uint32_t *) exit_stub)[i]);
+    fprintf(f, "], \"stubs\": [");
+    for (unsigned id = STUB_GENERIC; id < NSTUBS && stub_rec[id]; id++) {
+        const struct rec_seg *rs = stub_rec[id];
+        fprintf(f, "%s{\"words\": [", id > STUB_GENERIC ? ", " : "");
+        for (unsigned j = 0; j < rs->nwords; j++)
+            fprintf(f, "%s%u", j ? ", " : "", rs->words[j]);
+        fprintf(f, "], \"rel\": [");
+        rec_rels(f, rs);
+        fprintf(f, "]}");
+    }
     fprintf(f, "]}}\n");
     // Pass 2: write them.
     for (size_t k = 0; t && w && k < n; k++) {
@@ -3148,16 +3311,7 @@ static void rec_write(const char *path) {
             for (unsigned j = 0; j < rs->nwords; j++)
                 fprintf(f, "%s%u", j ? ", " : "", rs->words[j]);
             fprintf(f, "], \"rel\": [");
-            for (unsigned j = 0; j < rs->nrel; j++) {
-                fprintf(f, "%s[%u, ", j ? ", " : "", rs->rel[j].at);
-                if (rs->rel[j].kind == REL_EXIT) {
-                    fprintf(f, "\"exit\"]");
-                } else {
-                    fprintf(f, "\"sym\", ");
-                    rec_sym(f, rs->rel[j].val);
-                    fprintf(f, "]");
-                }
-            }
+            rec_rels(f, rs);
             fprintf(f, "], \"links\": [");
             for (int slot = 0, first = 1; slot < 2; slot++) {
                 if (rs->link_at[slot] < 0) continue;
@@ -3390,6 +3544,8 @@ size_t jit_describe(char *buf, size_t size) {
 }
 
 void jit_report(void) {
+    // Guest init uses _exit(), not host atexit; profiling works with ISH_JIT=0.
+    dump_block_prof();
     // ISH_JIT_DUMP=<file>: [u64 region base][u64 bytes][code], for attributing
     // host PC samples to generated code.
     if (!jit_on)
@@ -3491,6 +3647,11 @@ static void jit_init(void) {
     }
     if (have_region) {
         make_exit_stub();
+        if (!exit_stub) return;
+#ifndef ISH_JIT_NO_EMIT
+        if (pic_on && n_pinned && !env_off("ISH_JIT_STUBS"))
+            make_stubs();
+#endif
         jit_exec_ready();
     }
     if (pic_on)

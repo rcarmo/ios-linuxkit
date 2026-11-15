@@ -1,14 +1,65 @@
 /*
  * ARM64 Cryptographic Extension Gadgets
  *
- * AES, SHA1, SHA256, and SHA512 gadgets use native .inst instructions
- * for near-native performance. Other crypto gadgets (EOR3, SM3, SM4,
+ * AES, SHA1, SHA256, and supported SHA512 gadgets use native .inst
+ * instructions. SHA512 falls back to C without host FEAT_SHA512.
+ * Other crypto gadgets (EOR3, SM3, SM4,
  * PMULL, TBL/TBX, SVE) still use C helper functions.
  */
 
 #include "gadgets.h"
 
 .text
+
+// Mach-O uses GOTPAGE relocations; ELF uses GOT relocations (also PIC-safe).
+.macro sha512_check name
+#if defined(__APPLE__)
+    adrp x8, NAME(ish_host_sha512)@GOTPAGE
+    ldr x8, [x8, NAME(ish_host_sha512)@GOTPAGEOFF]
+#else
+    adrp x8, :got:NAME(ish_host_sha512)
+    ldr x8, [x8, :got_lo12:NAME(ish_host_sha512)]
+#endif
+    ldrb w8, [x8]
+    cbz w8, .L\name\()_soft
+.endm
+
+// Match the existing helper-call ABI: CPU/TLB, low cached guest registers,
+// code-stream pointer, callee-saved registers and LR survive the C call.
+// SIMD guest state lives in CPU_fp, not in host SIMD registers.
+.macro sha512_fallback name, helper, three=1
+.L\name\()_soft:
+    stp x19, x20, [sp, #-0x70]!
+    stp x21, x22, [sp, #0x10]
+    stp x23, x24, [sp, #0x20]
+    stp x25, x26, [sp, #0x30]
+    stp x27, x28, [sp, #0x40]
+    str lr, [sp, #0x50]
+    mrs x8, nzcv
+    str x8, [sp, #0x58]
+    // Integer helpers may be auto-vectorized; do not leak host FP status.
+    mrs x8, fpsr
+    str x8, [sp, #0x60]
+    save_c
+    add x0, x12, x13        // vd
+    add x1, x12, x14        // vn
+.if \three
+    add x2, x12, x15        // vm
+.endif
+    bl \helper
+    restore_c
+    ldr x8, [sp, #0x60]
+    msr fpsr, x8
+    ldr x8, [sp, #0x58]
+    msr nzcv, x8
+    ldr lr, [sp, #0x50]
+    ldp x27, x28, [sp, #0x40]
+    ldp x25, x26, [sp, #0x30]
+    ldp x23, x24, [sp, #0x20]
+    ldp x21, x22, [sp, #0x10]
+    ldp x19, x20, [sp], #0x70
+    gret
+.endm
 
 /*
  * AESE - AES single round encryption
@@ -366,12 +417,14 @@
 
     // Execute native SHA512SU0 instruction
     // SHA512SU0 V0.2D, V1.2D
+    sha512_check sha512su0
     .inst 0xcec08020         // sha512su0 v0.2d, v1.2d
 
     // Store result back to Vd
     str q0, [x12, x13]
 
     gret
+    sha512_fallback sha512su0, NAME(sha512su0_helper), 0
 
 /*
  * SHA512SU1 Vd.2D, Vn.2D, Vm.2D
@@ -397,12 +450,14 @@
 
     // Execute native SHA512SU1 instruction
     // SHA512SU1 V0.2D, V1.2D, V2.2D
+    sha512_check sha512su1
     .inst 0xce628820         // sha512su1 v0.2d, v1.2d, v2.2d
 
     // Store result back to Vd
     str q0, [x12, x13]
 
     gret
+    sha512_fallback sha512su1, NAME(sha512su1_helper)
 
 /*
  * SHA512H Qd, Qn, Vm.2D
@@ -428,12 +483,14 @@
 
     // Execute native SHA512H instruction
     // SHA512H Qd, Qn, Vm.2D -> SHA512H Q0, Q1, V2.2D
+    sha512_check sha512h
     .inst 0xce628020         // sha512h q0, q1, v2.2d
 
     // Store result back to Vd
     str q0, [x12, x13]
 
     gret
+    sha512_fallback sha512h, NAME(sha512h_helper)
 
 /*
  * SHA512H2 Qd, Qn, Vm.2D
@@ -459,12 +516,14 @@
 
     // Execute native SHA512H2 instruction
     // SHA512H2 Q0, Q1, V2.2D
+    sha512_check sha512h2
     .inst 0xce628420         // sha512h2 q0, q1, v2.2d
 
     // Store result back to Vd
     str q0, [x12, x13]
 
     gret
+    sha512_fallback sha512h2, NAME(sha512h2_helper)
 
 /*
  * EOR3 Vd.16B, Vn.16B, Vm.16B, Va.16B

@@ -3,7 +3,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { appleBuildVersion } from './apple';
-import { checked, definedSymbols, matchContract, seal, sha } from './kit';
+import { checked, definedSymbols, matchContract, recordingSymbols, seal, sha } from './kit';
 import { appleModules } from './apple-modules';
 
 const [recorderArg, rootArg, binaryArg, contractArg, outArg] = process.argv.slice(2);
@@ -67,12 +67,7 @@ for (const module of order) {
         throw Error(`incomplete ${module.name} recording: code arena exhausted or recorder lacks capacity diagnostics`);
     if (!rows.length || rows.some(row => row.header || row.mod !== module.path) || !rows.some(row => row.segs?.length))
         throw Error('invalid/empty recording');
-    const required = new Set<string>(['ish_aot_register']);
-    for (const row of rows) {
-        for (const name of Object.values(row.keysym || {})) required.add(name as string);
-        for (const segment of row.segs) for (const rel of segment.rel)
-            if (rel[1] !== 'exit') required.add(rel[2]);
-    }
+    const required = recordingSymbols(header, rows);
     for (const name of required) if (name !== '@region' && !symbols.has(name))
         throw Error(`unresolved target symbol: ${name}`);
     checked(['python3', join(import.meta.dir, 'gen.py'), record, binary, join(root, 'data'),

@@ -81,6 +81,20 @@ static void crash_handler(int sig, siginfo_t *info, void *ctx) {
     _exit(139);
 }
 
+#ifdef GUEST_ARM64
+extern void dump_block_prof(void);
+static void (*profile_previous_exit_hook)(struct task *, int);
+static void profile_exit_hook(struct task *task, int code) {
+    // The kernel halts with _exit(), bypassing atexit. Module paths are owned
+    // by the profiler, so this is safe even after the guest mm was released.
+    // Child exits must not truncate the process-wide profile.
+    if (task->group->leader->pid == 1)
+        dump_block_prof();
+    if (profile_previous_exit_hook)
+        profile_previous_exit_hook(task, code);
+}
+#endif
+
 static struct termios saved_termios;
 static int saved_termios_valid;
 
@@ -247,6 +261,10 @@ int main(int argc, char *const argv[]) {
         fprintf(stderr, "xX_main_Xx: %s\n", strerror(-err));
         return err;
     }
+#ifdef GUEST_ARM64
+    profile_previous_exit_hook = exit_hook;
+    exit_hook = profile_exit_hook;
+#endif
     do_mount(&procfs, "proc", "/proc", "", 0);
     do_mount(&devptsfs, "devpts", "/dev/pts", "", 0);
     ensure_guest_runtime_dirs();

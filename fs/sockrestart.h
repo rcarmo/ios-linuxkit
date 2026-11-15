@@ -20,6 +20,8 @@ void sockrestart_begin_listen(struct fd *sock);
 void sockrestart_end_listen(struct fd *sock);
 void sockrestart_begin_listen_wait(struct fd *sock);
 void sockrestart_end_listen_wait(struct fd *sock);
+// Balance a snapshot even if poll members were removed during the host wait.
+void sockrestart_end_listen_wait_count(unsigned count);
 bool sockrestart_should_restart_listen_wait(void);
 void sockrestart_on_suspend(void);
 void sockrestart_on_resume(void);

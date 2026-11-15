@@ -16,7 +16,7 @@ function slice(source: string, start: string, end: string) {
     return source.slice(a, b);
 }
 const main = await Bun.file(join(root, 'main.c')).text();
-await Bun.write(join(out, 'cli-recovery.c'), '#include "platform/native_fault.h"\n#include "platform/native_fault.c"\n#include "platform/native_fault_app.c"\n' + slice(main, 'static void crash_handler(', 'static struct termios saved_termios'));
+await Bun.write(join(out, 'cli-recovery.c'), '#include "platform/native_fault.h"\n#include "platform/native_fault.c"\n#include "platform/native_fault_app.c"\n' + slice(main, 'static void crash_handler(', '\n#ifdef GUEST_ARM64\nextern void dump_block_prof'));
 const dispatch = await Bun.file(join(root, 'asbestos/asbestos.c')).text();
 const tlb = await Bun.file(join(root, 'emu/tlb.c')).text();
 await Bun.write(join(out, 'dispatch-recovery.c'), `
@@ -48,4 +48,6 @@ for (const opt of ['-O0', '-O2']) {
         run(['timeout', '-k', '2', '120', exe]);
     }
 }
+run(['bun', 'test', join(import.meta.dir, 'stubs.test.ts'),
+    join(import.meta.dir, 'profile-producer.test.ts'), join(import.meta.dir, 'profile-gadget.test.ts')]);
 console.log(`native-aot-emitter-gate-ok: ${out}`);

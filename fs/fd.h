@@ -202,6 +202,8 @@ struct fdtable {
     unsigned size;
     struct fd **files;
     bits_t *cloexec;
+    // Protected by lock; never wrap a slot's publication identity.
+    uint64_t *generation;
     lock_t lock;
 };
 
@@ -213,6 +215,20 @@ void fdtable_do_cloexec(struct fdtable *table);
 struct fd *fdtable_get(struct fdtable *table, fd_t f);
 
 struct fd *f_get(fd_t f);
+// Lookup + retain under the table lock. Caller must fd_close() the result.
+struct fd *f_get_retained(fd_t f);
+// Pins the publishing table, not the object. Keep an independent fd reference
+// until rollback/release. Initialize to zero; release on every successful path.
+struct fd_install_token {
+    struct fdtable *table;
+    fd_t slot;
+    uint64_t generation;
+    struct fd *expected;
+};
+fd_t f_install_owned(struct fd *fd, int flags, struct fd_install_token *token);
+// Roll back only this publication, and consume the token even on mismatch.
+bool f_uninstall(struct fd_install_token *token);
+void f_install_release(struct fd_install_token *token);
 // steals a reference to the fd, gives it to the table on success and destroys it on error
 // flags is checked for O_CLOEXEC and O_NONBLOCK
 fd_t f_install(struct fd *fd, int flags);

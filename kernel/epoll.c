@@ -1,4 +1,5 @@
 #include <sys/stat.h>
+#include <limits.h>
 #include "kernel/calls.h"
 #include "fs/poll.h"
 
@@ -13,8 +14,10 @@ fd_t sys_epoll_create(int_t flags) {
     if (fd == NULL)
         return _ENOMEM;
     struct poll *poll = poll_create();
-    if (IS_ERR(poll))
+    if (IS_ERR(poll)) {
+        fd_close(fd);
         return PTR_ERR(poll);
+    }
     fd->epollfd.poll = poll;
     return f_install(fd, flags);
 }
@@ -42,38 +45,39 @@ __attribute__((packed))
 
 int_t sys_epoll_ctl(fd_t epoll_f, int_t op, fd_t f, addr_t event_addr) {
     STRACE("epoll_ctl(%d, %d, %d, %#x)", epoll_f, op, f, event_addr);
-    struct fd *epoll = f_get(epoll_f);
+    struct fd *epoll = f_get_retained(epoll_f);
     if (epoll == NULL)
         return _EBADF;
+    struct fd *fd = NULL;
+    int res = _EINVAL;
     if (epoll->ops != &epoll_ops)
-        return _EINVAL;
-    struct fd *fd = f_get(f);
-    if (fd == NULL)
-        return _EBADF;
-
-    // Regular files (and directories) are not pollable: they are always
-    // "ready", so Linux rejects adding them to an epoll set with EPERM. iSH
-    // used to accept them, which makes bun's fs.WriteStream take its polling
-    // path (instead of the EPERM fallback) and then throw EEXIST on the second
-    // registration of the same fd. Match Linux and reject with EPERM.
-    if (op == EPOLL_CTL_ADD_ && (S_ISREG(fd->type) || S_ISDIR(fd->type)))
-        return _EPERM;
-
-    if (op == EPOLL_CTL_DEL_)
-        return poll_del_fd(epoll->epollfd.poll, fd, f);
-
-    struct epoll_event_ event;
-    if (user_get(event_addr, event))
-        return _EFAULT;
-    STRACE(" {events: %#x, data: %#x}", event.events, event.data);
-
-    if (op == EPOLL_CTL_ADD_) {
-        if (poll_has_fd(epoll->epollfd.poll, fd, f))
-            return _EEXIST;
-        return poll_add_fd(epoll->epollfd.poll, fd, f, event.events, (union poll_fd_info) event.data);
-    } else {
-        return poll_mod_fd(epoll->epollfd.poll, fd, f, event.events, (union poll_fd_info) event.data);
+        goto out;
+    fd = f_get_retained(f);
+    if (fd == NULL) { res = _EBADF; goto out; }
+    if (fd == epoll)
+        goto out;
+    // Keep regular-file readiness in poll/select, not guest epoll.
+    if (op == EPOLL_CTL_ADD_ && (S_ISREG(fd->type) || S_ISDIR(fd->type))) {
+        res = _EPERM;
+        goto out;
     }
+    if (op == EPOLL_CTL_DEL_) {
+        res = poll_del_fd(epoll->epollfd.poll, fd, f);
+        goto out;
+    }
+    if (op != EPOLL_CTL_ADD_ && op != EPOLL_CTL_MOD_)
+        goto out;
+    struct epoll_event_ event;
+    if (user_get(event_addr, event)) { res = _EFAULT; goto out; }
+    STRACE(" {events: %#x, data: %#x}", event.events, event.data);
+    // Duplicate detection is atomic with insertion under poll->lock.
+    res = op == EPOLL_CTL_ADD_
+        ? poll_add_fd(epoll->epollfd.poll, fd, f, event.events, (union poll_fd_info) event.data)
+        : poll_mod_fd(epoll->epollfd.poll, fd, f, event.events, (union poll_fd_info) event.data);
+out:
+    if (fd) fd_close(fd);
+    fd_close(epoll);
+    return res;
 }
 
 struct epoll_context {
@@ -92,21 +96,21 @@ static int epoll_callback(void *context, int types, union poll_fd_info info) {
 
 int_t sys_epoll_wait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t timeout) {
     STRACE("epoll_wait(%d, %#x, %d, %d)", epoll_f, events_addr, max_events, timeout);
-    struct fd *epoll = f_get(epoll_f);
+    struct fd *epoll = f_get_retained(epoll_f);
     if (epoll == NULL)
         return _EBADF;
-    if (epoll->ops != &epoll_ops)
+    if (epoll->ops != &epoll_ops || max_events <= 0 ||
+            max_events > INT_MAX / (int) sizeof(struct epoll_event_)) {
+        fd_close(epoll);
         return _EINVAL;
-
+    }
+    struct epoll_event_ *events = malloc((size_t) max_events * sizeof(*events));
+    if (!events) { fd_close(epoll); return _ENOMEM; }
     struct timespec timeout_ts;
     if (timeout >= 0) {
         timeout_ts.tv_sec = timeout / 1000;
         timeout_ts.tv_nsec = (timeout % 1000) * 1000000;
     }
-    if (max_events <= 0)
-        return _EINVAL;
-    struct epoll_event_ events[max_events];
-
     struct epoll_context context = {.events = events, .n = 0, .max_events = max_events};
     STRACE("...\n");
     int res = poll_wait(epoll->epollfd.poll, epoll_callback, &context, timeout < 0 ? NULL : &timeout_ts);
@@ -116,7 +120,7 @@ int_t sys_epoll_wait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t t
             STRACE(" {events: %#x, data: %#x}", events[i].events, events[i].data);
         }
         if (user_write(events_addr, events, sizeof(struct epoll_event_) * res))
-            return _EFAULT;
+            res = _EFAULT;
     } else if (res != _EINTR) {
         // Host-level errors from kqueue/kevent should not propagate to the guest
         // as unexpected errnos. libuv asserts that epoll_pwait only fails with
@@ -125,6 +129,8 @@ int_t sys_epoll_wait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t t
         printk("epoll_wait: converting error %d to EINTR (pid=%d)\n", res, current->pid);
         res = _EINTR;
     }
+    free(events);
+    fd_close(epoll);
     return res;
 }
 
@@ -141,7 +147,8 @@ int_t sys_epoll_pwait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t 
 }
 
 static int epoll_close(struct fd *fd) {
-    poll_destroy(fd->epollfd.poll);
+    if (fd->epollfd.poll)
+        poll_destroy(fd->epollfd.poll);
     return 0;
 }
 

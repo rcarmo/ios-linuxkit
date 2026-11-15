@@ -19,6 +19,7 @@ __thread struct fiber_frame *jit_active_frame;
 #include "emu/interrupt.h"
 #include "emu/tlb.h"
 #include "kernel/memory.h"
+#include "kernel/fs.h"
 #include "util/list.h"
 
 // Thread-local recovery state for JIT crash handling.
@@ -184,6 +185,140 @@ void arm64_block_stats_count_chained_entry(struct fiber_block *from, unsigned lo
 #else
 #define ARM64_BLOCK_STAT_INC(counter) do {} while (0)
 #define ARM64_BLOCK_STAT_ADD(counter, value) do {} while (0)
+#endif
+
+#ifdef GUEST_ARM64
+// Optional dispatch profile. Exact counts require ISH_JIT=0 and a gadget
+// build with DISABLE_BLOCK_CHAINING + DISABLE_RET_CACHE (ordinary builds
+// bypass dispatch on chained edges). Never pretend unsupported env switches
+// such as ISH_NO_CHAIN make this checkout's gadget engine exact.
+#define BLK_PROF_SZ (1u << 18)
+#define BLK_PROF_MOD (1ull << 63)
+static struct { uint64_t key, insns, count; } *blk_prof;
+static pthread_once_t blk_prof_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t blk_prof_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t blk_prof_dropped;
+static const char *blk_prof_file;
+// Private path registry: never touch data->jit_mod or initialize the JIT.
+#define BLK_PROF_MAX_MODS 1024
+static char *blk_prof_paths[BLK_PROF_MAX_MODS];
+static unsigned blk_prof_npaths;
+static __thread bool blk_prof_ready;
+// Cache only within a guest quantum (mem read-locked), not across mm teardown.
+static __thread struct {
+    bool valid;
+    struct mmu *mmu;
+    uint64_t changes, page, off;
+    int mod;
+} blk_prof_mapping;
+static void blk_prof_init(void);
+void dump_block_prof(void) {
+    pthread_once(&blk_prof_once, blk_prof_init);
+    if (!blk_prof) return;
+    pthread_mutex_lock(&blk_prof_lock);
+    FILE *f = fopen(blk_prof_file, "w");
+    if (!f) { perror("block profile"); pthread_mutex_unlock(&blk_prof_lock); return; }
+    fprintf(f, "# dispatch profile; dropped=%llu; exact requires gadget no-chain/no-ret-cache build\n",
+            (unsigned long long) blk_prof_dropped);
+    for (unsigned i = 0; i < BLK_PROF_SZ; i++) {
+        uint64_t k = blk_prof[i].key;
+        if (!k) continue;
+        if (k & BLK_PROF_MOD) {
+            unsigned mod = (unsigned) ((k >> 40) & ((1u << 22) - 1));
+            fprintf(f, "%s %llx %llu %llu\n", blk_prof_paths[mod],
+                    (unsigned long long) (k & ((1ull << 40) - 1)),
+                    (unsigned long long) blk_prof[i].insns, (unsigned long long) blk_prof[i].count);
+            continue;
+        }
+        fprintf(f, "%llx %llu %llu\n", (unsigned long long) k,
+                (unsigned long long) blk_prof[i].insns, (unsigned long long) blk_prof[i].count);
+    }
+    fclose(f);
+    pthread_mutex_unlock(&blk_prof_lock);
+}
+static void blk_prof_init(void) {
+    blk_prof_file = getenv("ISH_BLOCK_PROF_FILE");
+    if (!blk_prof_file || !*blk_prof_file) return;
+    blk_prof = calloc(BLK_PROF_SZ, sizeof(*blk_prof));
+    if (!blk_prof) return;
+    atexit(dump_block_prof);
+    fprintf(stderr, "[block_prof] dispatch sampling enabled; exact counts need ISH_JIT=0, "
+            "DISABLE_BLOCK_CHAINING and DISABLE_RET_CACHE; "
+            "ISH_NO_CHAIN/ISH_NO_RETCACHE are unsupported\n");
+}
+// Caller holds blk_prof_lock and the guest address space read lock. Match
+// cm_locate's file-offset convention, including host-page rounding in realfs.
+// Anonymous/unresolved mappings stay raw addresses, never invented offsets.
+static int blk_prof_locate(struct tlb *tlb, addr_t pc, uint64_t *off) {
+    if (!tlb || !tlb->mmu) return -1;
+    uint64_t changes = __atomic_load_n(&tlb->mmu->changes, __ATOMIC_ACQUIRE);
+    if (blk_prof_mapping.valid && blk_prof_mapping.mmu == tlb->mmu &&
+            blk_prof_mapping.changes == changes && blk_prof_mapping.page == PAGE(pc)) {
+        *off = blk_prof_mapping.off + PGOFFSET(pc);
+        return blk_prof_mapping.mod;
+    }
+    struct mem *mem = container_of(tlb->mmu, struct mem, mmu);
+    struct pt_entry *pt = mem_pt(mem, PAGE(pc));
+    int mod = -1;
+    uint64_t base_off = 0;
+    if (pt && pt->data && pt->data->fd) {
+        struct data *data = pt->data;
+        char path[MAX_PATH];
+        if (data->name) {
+            snprintf(path, sizeof(path), "%s", data->name);
+        } else if (generic_getpath(data->fd, path) < 0) {
+            path[0] = '\0';
+        }
+        if (path[0]) {
+            for (unsigned i = 0; i < blk_prof_npaths; i++) {
+                if (!strcmp(blk_prof_paths[i], path)) { mod = (int) i; break; }
+            }
+            if (mod < 0 && blk_prof_npaths < BLK_PROF_MAX_MODS) {
+                char *copy = strdup(path);
+                if (copy) {
+                    mod = (int) blk_prof_npaths;
+                    blk_prof_paths[blk_prof_npaths++] = copy;
+                }
+            }
+        }
+        base_off = data->file_offset - data->file_offset % real_page_size + pt->offset;
+    }
+    blk_prof_mapping.valid = true;
+    blk_prof_mapping.mmu = tlb->mmu;
+    blk_prof_mapping.changes = changes;
+    blk_prof_mapping.page = PAGE(pc);
+    blk_prof_mapping.off = base_off;
+    blk_prof_mapping.mod = mod;
+    *off = base_off + PGOFFSET(pc);
+    return mod;
+}
+static void blk_prof_record(struct tlb *tlb, struct fiber_block *block) {
+    // Initialized once per execution thread before dispatch; disabled mode
+    // does not call pthread_once, resolve mappings, or acquire any mutex here.
+    if (!blk_prof) return;
+    uint64_t key = block->addr;
+    if (!key) return;
+    pthread_mutex_lock(&blk_prof_lock);
+    uint64_t off;
+    int mod = blk_prof_locate(tlb, block->addr, &off);
+    if (mod >= 0 && off < (1ull << 40))
+        key = BLK_PROF_MOD | (uint64_t) mod << 40 | off;
+    // gen.c stores the last byte, not the exclusive instruction end.
+    uint64_t insns = ((block->end_addr - block->addr) >> 2) + 1;
+    unsigned h = (unsigned) ((key * 0x9e3779b97f4a7c15ull) >> 46);
+    for (unsigned probe = 0; probe < 64; probe++) {
+        unsigned i = (h + probe) & (BLK_PROF_SZ - 1);
+        if (!blk_prof[i].key || (blk_prof[i].key == key && blk_prof[i].insns == insns)) {
+            blk_prof[i].key = key;
+            blk_prof[i].insns = insns;
+            blk_prof[i].count++;
+            pthread_mutex_unlock(&blk_prof_lock);
+            return;
+        }
+    }
+    blk_prof_dropped++;
+    pthread_mutex_unlock(&blk_prof_lock);
+}
 #endif
 
 // Stubs / debug hooks referenced from assembly/gen.c/tlb.c
@@ -664,7 +799,7 @@ void asbestos_invalidate_all(struct asbestos *asbestos) {
 }
 
 static struct fiber_block *fiber_lookup(struct asbestos *asbestos, addr_t addr);
-#ifdef GUEST_ARM64
+#if defined(GUEST_ARM64) && !defined(DISABLE_BLOCK_CHAINING)
 static void fiber_prechain_same_page(struct asbestos *asbestos, struct fiber_block *block);
 #endif
 
@@ -696,7 +831,9 @@ static void fiber_insert(struct asbestos *asbestos, struct fiber_block *block) {
     list_init_add(blocks_list(asbestos, PAGE(block->addr), 0), &block->page[0]);
     if (PAGE(block->addr) != PAGE(block->end_addr))
         list_init_add(blocks_list(asbestos, PAGE(block->end_addr), 1), &block->page[1]);
-#ifdef GUEST_ARM64
+#if defined(GUEST_ARM64) && !defined(DISABLE_BLOCK_CHAINING)
+    // No-chain gadgets decode jump operands as guest PCs, never host pointers.
+    // The build-time prohibition wins over both default and explicit env opt-ins.
     if (arm64_eager_prechain_enabled)
         fiber_prechain_same_page(asbestos, block);
 #endif
@@ -726,6 +863,7 @@ static bool arm64_fake_jump_target(unsigned long jump_ip, addr_t *target_addr) {
     return true;
 }
 
+#ifndef DISABLE_BLOCK_CHAINING
 static bool fiber_prechain_patch_slot(struct fiber_block *source, int i, struct fiber_block *target) {
     if (source->jump_ip[i] == NULL || !source->jump_ip_is_fake[i] ||
             source->is_jetsam || target->is_jetsam)
@@ -823,7 +961,8 @@ static void fiber_prechain_same_page(struct asbestos *asbestos, struct fiber_blo
     if (arm64_eager_prechain_incoming_enabled)
         fiber_prechain_incoming_same_page(asbestos, block);
 }
-#endif
+#endif // !DISABLE_BLOCK_CHAINING
+#endif // GUEST_ARM64
 
 static struct fiber_block *fiber_block_compile(addr_t ip, struct tlb *tlb) {
     struct gen_state state;
@@ -1113,6 +1252,9 @@ static int cpu_step_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
         jit_saved_pc = frame->cpu.pc;
         frame->jit_saved_pc = frame->cpu.pc;
 
+#ifdef GUEST_ARM64
+        blk_prof_record(tlb, block);
+#endif
 #ifdef ISH_JIT
         frame->native_fault_host_pc = 0;
         jit_active_frame = frame;
@@ -1223,6 +1365,11 @@ int cpu_run_to_interrupt(struct cpu_state *cpu, struct tlb *tlb) {
     if (cpu->poked_ptr == NULL)
         cpu->poked_ptr = &cpu->_poked;
 #ifdef GUEST_ARM64
+    if (!blk_prof_ready) {
+        pthread_once(&blk_prof_once, blk_prof_init);
+        blk_prof_ready = true;
+    }
+    blk_prof_mapping.valid = false;
     // NOTE: Do NOT invalidate exclusive monitor here.
     // This function is called once, but the inner loop (cpu_step_to_interrupt)
     // calls fiber_enter repeatedly. The LDXR/STXR pair may span multiple

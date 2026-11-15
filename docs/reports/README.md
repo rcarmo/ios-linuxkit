@@ -13,6 +13,8 @@ package versions and commands may be outdated. Use the
 
 ## Recent reports
 
+- [OpenMinis completion](audits/OPENMINIS_COMPLETION_2026-11-15.md): fd/poll
+  ownership, shared AOT paths, profiling, stale TLBs, SHA512 fallback and ABI-15 gates.
 - [Crate/OpenMinis follow-up and Bun 1.4.4](audits/CRATE_OPENMINIS_2026-11-15.md):
   emitter reductions, paired host timings, fresh Linux no-emitter proof and
   remaining upstream/device work.

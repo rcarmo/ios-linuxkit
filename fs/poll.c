@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <time.h>
+#include <sched.h>
 #include "misc.h"
 #include "util/list.h"
 #include "kernel/errno.h"
@@ -14,8 +15,6 @@
 
 #include "fs/sockrestart.h"
 
-// From kernel/calls.h - avoid circular include
-extern _Noreturn void do_exit_group(int status);
 
 #if defined(__linux__)
 #include <sys/epoll.h>
@@ -55,8 +54,11 @@ struct poll *poll_create() {
     if (poll == NULL)
         return ERR_PTR(_ENOMEM);
     int err = real_poll_init(&poll->real);
-    if (err < 0)
-        return ERR_PTR(errno_map());
+    if (err < 0) {
+        int saved = errno_map();
+        free(poll);
+        return ERR_PTR(saved);
+    }
     poll->waiters = 0;
     poll->notify_pipe[0] = -1;
     poll->notify_pipe[1] = -1;
@@ -84,6 +86,15 @@ static struct poll_fd *poll_find_fd(struct poll *poll, struct fd *fd, int fd_no)
             return poll_fd;
     }
     return NULL;
+}
+
+static int poll_real_types(struct poll *poll, struct fd *fd) {
+    int types = 0;
+    struct poll_fd *pf;
+    list_for_each_entry(&poll->poll_fds, pf, fds)
+        if (pf->fd == fd && !pf->oneshot_fired)
+            types |= pf->types;
+    return types & ~POLL_ONESHOT;
 }
 
 // Recompute the host (real) registration for `fd` in this poll as the UNION
@@ -127,8 +138,12 @@ int poll_add_fd(struct poll *poll, struct fd *fd, int fd_no, int types, union po
     lock(&fd->poll_lock);
     lock(&poll->lock);
 
+    if (poll_find_fd(poll, fd, fd_no)) { err = _EEXIST; goto out; }
     struct poll_fd *poll_fd;
-    if (!list_empty(&poll->pollfd_freelist)) {
+    // A sleeping waiter may still hold a returned backend pointer. Reusing
+    // its retired storage before all waiters leave would turn stale events
+    // into events for an unrelated new registration (ABA).
+    if (!poll->waiters && !list_empty(&poll->pollfd_freelist)) {
         poll_fd = list_first_entry(&poll->pollfd_freelist, struct poll_fd, fds);
         list_remove(&poll_fd->fds);
     } else {
@@ -211,17 +226,30 @@ int poll_mod_fd(struct poll *poll, struct fd *fd, int fd_no, int types, union po
         goto out;
     }
 
+    int old_types = poll_fd_is_real(poll_fd) ? poll_real_types(poll, fd) : 0;
     poll_fd->types = types;
     poll_fd->info = info;
-    poll_fd->triggered_types &= types;
+    poll_fd->triggered_types = 0; // MOD re-arms even an already-ready ET fd
     poll_fd->oneshot_fired = false; // EPOLL_CTL_MOD re-arms a fired oneshot
 
-    if (poll_fd_is_real(poll_fd)) {
+    if (poll_fd_is_real(poll_fd) && old_types != poll_real_types(poll, fd)) {
         err = poll_real_refresh(poll, fd);
         if (err < 0) {
             err = errno_map();
             goto out;
         }
+    }
+
+    // MOD re-arms the userspace readiness state even when the shared host
+    // union is unchanged. Wake a waiter already past its readiness scan via
+    // the notify pipe, NOT a host MOD (which would duplicate a ready dup's
+    // edge). The poll lock pins the nonblocking pipe; EAGAIN means a wake is
+    // already queued. Notifying every successful MOD also covers emulated fds.
+    if (poll->notify_pipe[1] != -1) {
+        ssize_t written;
+        do {
+            written = write(poll->notify_pipe[1], "", 1);
+        } while (written < 0 && errno == EINTR);
     }
 
     err = 0;
@@ -240,8 +268,9 @@ void poll_cleanup_fd(struct fd *fd) {
             real_poll_update(&poll_fd->poll->real, fd->real_fd, 0, poll_fd);
         list_remove(&poll_fd->polls);
         list_remove(&poll_fd->fds);
-        unlock(&poll_fd->poll->lock);
+        struct poll *poll = poll_fd->poll;
         poll_fd_free(poll_fd);
+        unlock(&poll->lock);
     }
     unlock(&fd->poll_lock);
 }
@@ -266,24 +295,124 @@ void poll_wakeup(struct fd *fd, int events) {
     unlock(&fd->poll_lock);
 }
 
+static uint64_t poll_now_ns(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint64_t) now.tv_sec * 1000000000ULL + now.tv_nsec;
+}
+
+// Never take pids_lock while holding the poll lock: exit can close fds.
+// The exit safety valve may orphan this thread and reap its group while a
+// host wait or readiness callback runs. A pre-check alone cannot pin a group.
+static int poll_task_status(bool idle_check, bool *pending) {
+    int res = 0;
+    lock(&pids_lock);
+    if (current->exiting || current->group == NULL) { res = _EINTR; goto out; }
+    struct tgroup *group = current->group;
+    if (group->doing_group_exit) { res = _EINTR; goto out; }
+    if (pending) {
+        *pending = false;
+        if (current->sighand) {
+            lock(&current->sighand->lock);
+            *pending = !!(current->pending & ~current->blocked);
+            unlock(&current->sighand->lock);
+        }
+    }
+    if (idle_check && current->pid != 1 && group->tty == NULL) {
+        uint64_t now = poll_now_ns();
+        uint64_t last = atomic_load_explicit(&group->last_progress_ns, memory_order_relaxed);
+        int64_t idle_s = (int64_t)(now - last) / 1000000000LL;
+        if (idle_s >= 60) {
+            bool children = false;
+            unsigned threads = 0, nonblocking = 0;
+            lock(&group->lock);
+            // Do not form an over-aligned task pointer from the list-head
+            // sentinel: UBSan rightly diagnoses that container_of expression.
+            struct list *link;
+            list_for_each(&group->threads, link) {
+                struct task *t = list_entry(link, struct task, group_links);
+                threads++;
+                if (!t->blocking) nonblocking++;
+                struct list *child_link;
+                list_for_each(&t->children, child_link) {
+                    struct task *child = list_entry(child_link, struct task, siblings);
+                    if (child->group != group && !child->zombie) children = true;
+                }
+            }
+            unlock(&group->lock);
+            if (!children && !nonblocking) {
+                printk("SAFETY-VALVE[poll]: pid=%d idle %llds, %u threads -> SIGKILL\n",
+                       current->pid, (long long)idle_s, threads);
+                // Defer exit until the syscall has released its retained fds
+                // and notify pipe. Never exit with poll/pids locks held.
+                send_signal(current, SIGKILL_, SIGINFO_NIL);
+                res = _EINTR;
+            }
+        }
+    }
+out:
+    unlock(&pids_lock);
+    return res;
+}
+
 int poll_wait(struct poll *poll_, poll_callback_t callback, void *context, struct timespec *timeout) {
+    uint64_t deadline = UINT64_MAX;
+    if (timeout) {
+        if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000)
+            return _EINVAL;
+        uint64_t now = poll_now_ns();
+        if ((uint64_t) timeout->tv_sec <= (UINT64_MAX - now - timeout->tv_nsec) / 1000000000ULL)
+            deadline = now + (uint64_t) timeout->tv_sec * 1000000000ULL + timeout->tv_nsec;
+    }
     lock(&poll_->lock);
 
     // acquire the pipe
     if (poll_->waiters++ == 0) {
         assert(poll_->notify_pipe[0] == -1 && poll_->notify_pipe[1] == -1);
         if (pipe(poll_->notify_pipe) < 0) {
+            int saved = errno_map();
+            poll_->waiters--;
             unlock(&poll_->lock);
-            return errno_map();
+            return saved;
         }
         fcntl(poll_->notify_pipe[0], F_SETFL, O_NONBLOCK);
         fcntl(poll_->notify_pipe[1], F_SETFL, O_NONBLOCK);
-        real_poll_update(&poll_->real, poll_->notify_pipe[0], POLL_READ, NULL);
+        if (real_poll_update(&poll_->real, poll_->notify_pipe[0], POLL_READ, NULL) < 0) {
+            int saved = errno_map();
+            safe_close(poll_->notify_pipe[0]); safe_close(poll_->notify_pipe[1]);
+            poll_->notify_pipe[0] = poll_->notify_pipe[1] = -1;
+            poll_->waiters--;
+            unlock(&poll_->lock);
+            return saved;
+        }
     }
 
-    // TODO this is pretty broken with regards to timeouts
     int res = 0;
+    unsigned spurious = 0;
+    // Consume queued host edges BEFORE delivering the first readiness scan.
+    // Otherwise the first queued edge survives that delivery and looks like a
+    // second edge while the fd is still ready. Bound the harvest by a snapshot
+    // of registrations (plus notify); level-ready/spurious wakes cannot spin.
+    unsigned registrations = 1;
+    bool harvesting = false, waited = false, have_real = false;
+    struct poll_fd *member;
+    list_for_each_entry(&poll_->poll_fds, member, fds) {
+        registrations++;
+        if (poll_fd_is_real(member)) {
+            have_real = true;
+            if (member->types & POLL_EDGETRIGGERED)
+                harvesting = true;
+        }
+    }
+    unsigned harvest_left = (registrations + 3) / 4;
     while (true) {
+        bool signal_pending = false;
+        unlock(&poll_->lock);
+        int task_status = poll_task_status(false, &signal_pending);
+        lock(&poll_->lock);
+        if (task_status) { res = task_status; break; }
+        if (harvesting)
+            goto wait_backend;
         // check if any fds are ready
         struct poll_fd *poll_fd, *tmp;
         list_for_each_entry_safe(&poll_->poll_fds, poll_fd, tmp, fds) {
@@ -298,8 +427,9 @@ int poll_wait(struct poll *poll_, poll_callback_t callback, void *context, struc
                 poll_types &= ~poll_fd->triggered_types;
             }
             if (poll_types) {
-                if (callback(context, poll_types, poll_fd->info) == 1)
-                    res++;
+                if (callback(context, poll_types, poll_fd->info) != 1)
+                    continue; // A full result buffer must not consume an edge.
+                res++;
 
                 // The real poll does not actually get the FDs set as oneshot.
                 // But this loop is done while holding the lock, so only one
@@ -314,10 +444,14 @@ int poll_wait(struct poll *poll_, poll_callback_t callback, void *context, struc
                     // poll_wakeup when bun registers stdin with
                     // EPOLLONESHOT). Linux semantics also keep a fired
                     // oneshot registered, disabled until EPOLL_CTL_MOD.
+                    bool is_real = poll_fd_is_real(poll_fd);
+                    int old_types = is_real ? poll_real_types(poll_, fd) : 0;
                     poll_fd->oneshot_fired = true;
-                    if (poll_fd_is_real(poll_fd)) {
+                    if (is_real && old_types != poll_real_types(poll_, fd)) {
                         // Refresh the shared host registration to the union
-                        // of the still-armed registrations.
+                        // of the still-armed registrations. An unchanged
+                        // union must NOT issue MOD: that queues a stale edge
+                        // for still-ready, still-armed dup registrations.
                         poll_real_refresh(poll_, fd);
                     }
                 }
@@ -327,147 +461,95 @@ int poll_wait(struct poll *poll_, poll_callback_t callback, void *context, struc
                 }
             }
         }
-        if (res > 0)
+        if (res > 0) {
+            uint64_t now = poll_now_ns();
+            current->last_unblocked_ns = now;
             break;
-
-        bool signal_pending = false;
-        if (current->sighand != NULL) {
-            lock(&current->sighand->lock);
-            signal_pending = !!(current->pending & ~current->blocked);
-            unlock(&current->sighand->lock);
         }
+
         if (signal_pending) {
             res = _EINTR;
             break;
         }
 
+        // Charge all elapsed time, including rejected events and retries.
+        if (timeout && poll_now_ns() >= deadline) {
+            if (waited || !have_real)
+                break;
+            // Even timeout zero must harvest once, then re-scan readiness.
+            harvesting = true;
+        }
+
+wait_backend:;
         // wait for a ready notification
+        unsigned listen_count = current->sockrestart.count;
         list_for_each_entry(&poll_->poll_fds, poll_fd, fds) {
             sockrestart_begin_listen_wait(poll_fd->fd);
         }
+        listen_count = current->sockrestart.count - listen_count;
         unlock(&poll_->lock);
         int err;
         int saved_errno;
         struct real_poll_event e[4];
-        // Use a bounded timeout to avoid indefinite blocks. Guest signal
-        // delivery via SIGUSR1 wakes kevent, but if the signal arrives
-        // between our pending check and kevent entry, we'd block forever.
-        // A 5-second cap ensures we re-check signals periodically.
-        // Cap all waits to 1 second to avoid macOS condvar issues.
-        // pthread_cond_timedwait_relative_np can block forever under
-        // thread contention. Short caps ensure we re-check periodically.
-        struct timespec bounded_timeout = {.tv_sec = 1, .tv_nsec = 0};
-        struct timespec *wait_timeout;
-        if (timeout == NULL) {
-            wait_timeout = &bounded_timeout;
-        } else if (timeout->tv_sec >= 1) {
-            wait_timeout = &bounded_timeout; // Cap long timeouts
-        } else {
-            wait_timeout = timeout; // Short/zero timeouts pass through
-        }
+        // Re-check signals at least once per second, but never restart the
+        // caller's relative timeout after an event or sockrestart retry.
+        struct timespec bounded_timeout;
+        struct timespec *wait_timeout = &bounded_timeout;
         current->blocking = true;
-        do {
-            err = real_poll_wait(&poll_->real, e, sizeof(e)/sizeof(e[0]), wait_timeout);
-            saved_errno = errno;  // save immediately before anything clobbers it
-        } while (saved_errno == EINTR && sockrestart_should_restart_listen_wait());
-        current->blocking = false;
-        // Only update last_unblocked_ns when actual events were received.
-        // Timeout returns (err==0) don't count as real progress — the poll_wait
-        // loop is just cycling. This prevents the deadlock detector from being
-        // fooled by idle poll_wait loops during exit cleanup.
-        if (err > 0) {
-            struct timespec _ts;
-            clock_gettime(CLOCK_MONOTONIC, &_ts);
-            uint64_t now = (uint64_t)_ts.tv_sec * 1000000000ULL + _ts.tv_nsec;
-            current->last_unblocked_ns = now;
-            atomic_store_explicit(&current->group->last_progress_ns, now,
-                                  memory_order_relaxed);
+        if (!harvesting && spurious >= 64) {
+            uint64_t now = poll_now_ns();
+            uint64_t ns = timeout ? (deadline > now ? deadline - now : 0) : 1000000;
+            if (ns > 1000000) ns = 1000000;
+            struct timespec pause = {.tv_nsec = ns};
+            nanosleep(&pause, NULL); // unlocked; at most 1ms and deadline-bounded
         }
-        // If we timed out from our bounded timeout, loop back to re-check
-        // fd readiness and signal pending.
-        if (err == 0 && wait_timeout == &bounded_timeout) {
-            lock(&poll_->lock);
-            list_for_each_entry(&poll_->poll_fds, poll_fd, fds) {
-                sockrestart_end_listen_wait(poll_fd->fd);
-            }
-            // Check for group exit so blocking threads unblock promptly
-            if (current->group->doing_group_exit) {
-                res = _EINTR;
+        bool restart;
+        do {
+            uint64_t now = poll_now_ns();
+            uint64_t ns = harvesting ? 0 : timeout ? (deadline > now ? deadline - now : 0) : 1000000000ULL;
+            if (ns > 1000000000ULL) ns = 1000000000ULL;
+            bounded_timeout = (struct timespec) {.tv_sec = ns / 1000000000ULL, .tv_nsec = ns % 1000000000ULL};
+            err = real_poll_wait(&poll_->real, e, sizeof(e)/sizeof(e[0]), wait_timeout);
+            saved_errno = errno;
+            restart = err < 0 && saved_errno == EINTR && sockrestart_should_restart_listen_wait();
+            if (restart && (harvesting || (timeout && poll_now_ns() >= deadline))) {
+                // Internal restart at expiry is not a guest signal. Re-scan
+                // readiness/signals once, then return the ordinary timeout.
+                err = 0;
                 break;
             }
-            // Safety valve: if no thread in this process group has
-            // done real work for >60s and there are no live child
-            // processes, force exit. Catches V8/libuv exit cleanup
-            // hangs where the event loop spins idle forever.
-            //
-            // Exceptions:
-            //   - pid 1 (init): legitimately idles, killing halts the system
-            //   - processes with a controlling TTY: interactive shells idle
-            //     waiting for user input and must not be killed
-            if (current->pid != 1 && current->group->tty == NULL) {
-                struct timespec _now;
-                clock_gettime(CLOCK_MONOTONIC, &_now);
-                uint64_t now_ns = (uint64_t)_now.tv_sec * 1000000000ULL + _now.tv_nsec;
-                uint64_t last = atomic_load_explicit(
-                    &current->group->last_progress_ns, memory_order_relaxed);
-                int64_t idle_s = (int64_t)(now_ns - last) / 1000000000LL;
-                if (idle_s >= 60) {
-                    bool has_live_children = false;
-                    int thread_count = 0;
-                    int nonblocking_threads = 0;
-                    lock(&pids_lock);
-                    lock(&current->group->lock);
-                    struct task *t_iter;
-                    list_for_each_entry(&current->group->threads, t_iter, group_links) {
-                        thread_count++;
-                        if (!t_iter->blocking)
-                            nonblocking_threads++;
-                        struct task *child;
-                        list_for_each_entry(&t_iter->children, child, siblings) {
-                            if (child->group != current->group && !child->zombie)
-                                has_live_children = true;
-                        }
-                    }
-                    unlock(&current->group->lock);
-                    unlock(&pids_lock);
-                    if (!has_live_children && nonblocking_threads == 0) {
-                        printk("SAFETY-VALVE[poll]: pid=%d idle %llds, %d threads → exit_group\n",
-                               current->pid, (long long)idle_s, thread_count);
-                        do_exit_group(0);
-                    }
-                }
-            }
-            if (timeout != NULL) {
-                // Timed wait: subtract elapsed time
-                timeout->tv_sec -= 1;
-                if (timeout->tv_sec < 0) {
-                    // Original timeout expired
-                    break;
-                }
-            }
-            continue;
-        }
+        } while (restart && !(current->exiting || current->group == NULL));
+        current->blocking = false;
+        // Balance the snapshot, not the possibly modified member list. A
+        // socket can be removed/final-closed while the backend is sleeping.
+        sockrestart_end_listen_wait_count(listen_count);
+        task_status = poll_task_status(err == 0, NULL);
         lock(&poll_->lock);
-        list_for_each_entry(&poll_->poll_fds, poll_fd, fds) {
-            sockrestart_end_listen_wait(poll_fd->fd);
-        }
+        if (task_status) { res = task_status; break; }
+        waited = true;
+        if (harvesting && (--harvest_left == 0 || err < 4))
+            harvesting = false;
+        // Host wakeups alone do not count as guest progress.
+        if (err > 0) { if (spurious < 64) spurious++; }
+        else spurious = 0;
+        if (err == 0) continue; // next scan honours the absolute deadline
 
         if (err < 0) {
             errno = saved_errno;
             res = errno_map();
             break;
         }
-        if (err == 0) {
-            // timed out and still nobody is ready
-            break;
-        }
 
-        // dead with any edge-triggered notifications
+        // One host registration represents ALL guest dup registrations.
         for (int i = 0; i < err; i++) {
             struct poll_fd *triggered_poll_fd = rpe_data(&e[i]);
-            if (triggered_poll_fd != NULL && triggered_poll_fd->poll != NULL &&
-                    triggered_poll_fd->types & POLL_EDGETRIGGERED) {
-                triggered_poll_fd->triggered_types &= ~rpe_events(&e[i]);
+            if (triggered_poll_fd != NULL && triggered_poll_fd->poll == poll_) {
+                struct fd *fd = triggered_poll_fd->fd;
+                list_for_each_entry(&poll_->poll_fds, member, fds) {
+                    if (member->fd == fd && !member->oneshot_fired &&
+                            member->types & POLL_EDGETRIGGERED)
+                        member->triggered_types &= ~rpe_events(&e[i]);
+                }
             }
         }
 
@@ -494,8 +576,17 @@ int poll_wait(struct poll *poll_, poll_callback_t callback, void *context, struc
 void poll_destroy(struct poll *poll) {
     struct poll_fd *poll_fd;
     struct poll_fd *tmp;
+    lock(&poll->lock);
+    assert(poll->waiters == 0);
+restart:
     list_for_each_entry_safe(&poll->poll_fds, poll_fd, tmp, fds) {
-        lock(&poll_fd->fd->poll_lock);
+        // Cleanup locks fd then poll. Never block in the opposite order.
+        if (trylock(&poll_fd->fd->poll_lock) != 0) {
+            unlock(&poll->lock);
+            sched_yield();
+            lock(&poll->lock);
+            goto restart;
+        }
         list_remove(&poll_fd->polls);
         list_remove(&poll_fd->fds);
         unlock(&poll_fd->fd->poll_lock);
@@ -508,6 +599,7 @@ void poll_destroy(struct poll *poll) {
     }
 
     real_poll_close(&poll->real);
+    unlock(&poll->lock);
     free(poll);
 }
 
@@ -525,7 +617,7 @@ static int real_poll_init(struct real_poll *real) {
 static int real_poll_wait(struct real_poll *real, struct real_poll_event *events, int max, struct timespec *timeout) {
     int timeout_millis = -1;
     if (timeout != NULL)
-        timeout_millis = timeout->tv_sec * 1000 + timeout->tv_nsec / 1000000;
+        timeout_millis = timeout->tv_sec * 1000 + (timeout->tv_nsec + 999999) / 1000000;
     return epoll_wait(real->fd, (struct epoll_event *) events, max, timeout_millis);
 }
 
@@ -566,6 +658,7 @@ static int real_poll_update(struct real_poll *real, int fd, int types, void *dat
         // Set the low water mark really high so we'll only get woken up on a hangup
         e[0].fflags = NOTE_LOWAT;
         e[0].data = INT_MAX;
+        e[0].flags |= EV_CLEAR; // full pipes may ignore NOTE_LOWAT; contain rejected wakes
     }
     for (int i = 0; i < 3; i++) {
         e[i].ident = fd;

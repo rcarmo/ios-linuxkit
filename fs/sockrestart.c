@@ -39,14 +39,19 @@ void sockrestart_begin_listen_wait(struct fd *sock) {
     unlock(&sockrestart_lock);
 }
 
-void sockrestart_end_listen_wait(struct fd *sock) {
-    if (sock->ops != &socket_fdops)
-        return;
+void sockrestart_end_listen_wait_count(unsigned count) {
+    if (!count) return;
     lock(&sockrestart_lock);
-    current->sockrestart.count--;
+    assert(current->sockrestart.count >= (int) count);
+    current->sockrestart.count -= count;
     if (current->sockrestart.count == 0)
         list_remove(&current->sockrestart.listen);
     unlock(&sockrestart_lock);
+}
+
+void sockrestart_end_listen_wait(struct fd *sock) {
+    if (sock->ops == &socket_fdops)
+        sockrestart_end_listen_wait_count(1);
 }
 
 bool sockrestart_should_restart_listen_wait() {

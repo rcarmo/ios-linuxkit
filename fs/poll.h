@@ -24,7 +24,8 @@ struct poll {
     // almost went in 3.7 but was backed out after discussion at
     // https://lkml.org/lkml/2012/10/16/302, and anyway wouldn't have solved
     // the problem on Darwin. My solution is to just not free poll_fds, and
-    // instead move them to a freelist where they can be reused.
+    // instead move them to a freelist. Reuse only when no waiters remain,
+    // otherwise a stale backend event can name an unrelated new registration.
     struct list pollfd_freelist;
 
     lock_t lock;
@@ -99,8 +100,8 @@ void poll_wakeup(struct fd *fd, int events);
 // Returns the number of times the callback returned 1, or negative for error.
 typedef int (*poll_callback_t)(void *context, int types, union poll_fd_info info);
 int poll_wait(struct poll *poll, poll_callback_t callback, void *context, struct timespec *timeout);
-// does not lock the poll because lock ordering, you must ensure no other
-// thread will add or remove fds from this poll
+// Caller must own the last set reference (no active operations/waiters).
+// Concurrent final-close of member fds is supported via trylock/restart.
 void poll_destroy(struct poll *poll);
 
 // for fd_close

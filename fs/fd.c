@@ -63,6 +63,7 @@ struct fdtable *fdtable_new(int size) {
     fdt->size = 0;
     fdt->files = NULL;
     fdt->cloexec = NULL;
+    fdt->generation = NULL;
     lock_init(&fdt->lock);
     int err = fdtable_resize(fdt, size);
     if (err < 0) {
@@ -74,18 +75,19 @@ struct fdtable *fdtable_new(int size) {
 
 static int fdtable_close(struct fdtable *table, fd_t f);
 
-// FIXME this looks like it has the classic refcount UAF
 void fdtable_release(struct fdtable *table) {
-    lock(&table->lock);
-    if (--table->refcount == 0) {
+    // Drop the reference before touching the lock: a non-final releaser must
+    // never unlock a mutex that the final releaser can already have freed.
+    if (atomic_fetch_sub(&table->refcount, 1) == 1) {
+        lock(&table->lock);
         for (fd_t f = 0; (unsigned) f < table->size; f++)
             fdtable_close(table, f);
         free(table->files);
         free(table->cloexec);
+        free(table->generation);
         unlock(&table->lock);
+        pthread_mutex_destroy(&table->lock.m);
         free(table);
-    } else {
-        unlock(&table->lock);
     }
 }
 
@@ -109,6 +111,18 @@ static int fdtable_resize(struct fdtable *table, unsigned size) {
     if (table->cloexec)
         memcpy(cloexec, table->cloexec, BITS_SIZE(table->size));
 
+    uint64_t *generation = calloc(size, sizeof(*generation));
+    if (generation == NULL) {
+        free(files);
+        free(cloexec);
+        return _ENOMEM;
+    }
+    if (table->generation)
+        memcpy(generation, table->generation, sizeof(*generation) * table->size);
+
+    // Commit all three allocations together; failures leave the table intact.
+    free(table->generation);
+    table->generation = generation;
     free(table->files);
     table->files = files;
     free(table->cloexec);
@@ -130,6 +144,7 @@ struct fdtable *fdtable_copy(struct fdtable *table) {
         if (new_table->files[f])
             new_table->files[f]->refcount++;
     memcpy(new_table->cloexec, table->cloexec, BITS_SIZE(size));
+    memcpy(new_table->generation, table->generation, sizeof(*table->generation) * size);
     unlock(&table->lock);
     return new_table;
 }
@@ -156,9 +171,51 @@ struct fd *f_get(fd_t f) {
     return fd;
 }
 
-static fd_t f_install_start(struct fd *fd, fd_t start) {
-    assert(start >= 0);
+// Acquire while the table still owns the object; retaining after f_get races close.
+struct fd *f_get_retained(fd_t f) {
     struct fdtable *table = current->files;
+    if (!table)
+        return NULL;
+    lock(&table->lock);
+    struct fd *fd = fdtable_get(table, f);
+    if (fd)
+        fd_retain(fd);
+    unlock(&table->lock);
+    return fd;
+}
+
+void f_install_release(struct fd_install_token *token) {
+    struct fdtable *table = token->table;
+    *token = (struct fd_install_token) {};
+    if (table)
+        fdtable_release(table); // Always called without the table lock.
+}
+
+bool f_uninstall(struct fd_install_token *token) {
+    struct fdtable *table = token->table;
+    if (!table)
+        return false;
+    fd_t f = token->slot;
+    struct fd *expected = token->expected;
+    lock(&table->lock);
+    bool installed = fdtable_get(table, f) == expected &&
+        table->generation[f] == token->generation;
+    if (installed) {
+        if (expected->inode)
+            file_lock_remove_owned_by(expected, table);
+        table->files[f] = NULL;
+        bit_clear(f, table->cloexec);
+    }
+    unlock(&table->lock);
+    if (installed)
+        fd_close(expected);
+    f_install_release(token);
+    return installed;
+}
+
+// Caller holds table->lock; consumes the reference only on success.
+static fd_t f_install_start(struct fdtable *table, struct fd *fd, fd_t start) {
+    assert(start >= 0);
     unsigned size = rlimit(RLIMIT_NOFILE_);
     if (size > table->size)
         size = table->size;
@@ -174,25 +231,48 @@ static fd_t f_install_start(struct fd *fd, fd_t start) {
     }
 
     if (f >= 0) {
+        if (table->generation[f] == UINT64_MAX)
+            return _EOVERFLOW;
+        ++table->generation[f];
         table->files[f] = fd;
         bit_clear(f, table->cloexec);
-    } else {
-        fd_close(fd);
     }
     return f;
 }
 
-fd_t f_install(struct fd *fd, int flags) {
-    lock(&current->files->lock);
-    fd_t f = f_install_start(fd, 0);
+static fd_t f_install_common(struct fd *fd, int flags, struct fd_install_token *token) {
+    struct fdtable *table = current->files;
+    if (token)
+        *token = (struct fd_install_token) {};
+    lock(&table->lock);
+    fd_t f = f_install_start(table, fd, 0);
     if (f >= 0) {
         if (flags & O_CLOEXEC_)
-            bit_set(f, current->files->cloexec);
+            bit_set(f, table->cloexec);
         if (flags & O_NONBLOCK_)
             fd_setflags(fd, O_NONBLOCK_);
+        if (token) {
+            // Capture and pin DURING publication, before any unlock/rebind.
+            table->refcount++;
+            *token = (struct fd_install_token) {
+                .table = table, .slot = f,
+                .generation = table->generation[f], .expected = fd,
+            };
+        }
     }
-    unlock(&current->files->lock);
+    unlock(&table->lock);
+    if (f < 0)
+        fd_close(fd);
     return f;
+}
+
+fd_t f_install(struct fd *fd, int flags) {
+    return f_install_common(fd, flags, NULL);
+}
+
+fd_t f_install_owned(struct fd *fd, int flags, struct fd_install_token *token) {
+    assert(token);
+    return f_install_common(fd, flags, token);
 }
 
 static int fdtable_close(struct fdtable *table, fd_t f) {
@@ -285,32 +365,54 @@ void fdtable_do_cloexec(struct fdtable *table) {
 
 dword_t sys_dup(fd_t f) {
     STRACE("dup(%d)", f);
-    struct fd *fd = f_get(f);
+    struct fd *fd = f_get_retained(f);
     if (fd == NULL)
         return _EBADF;
-    fd->refcount++;
     return f_install(fd, 0);
+}
+
+static dword_t dup_to(fd_t f, fd_t new_f, int_t flags, bool dup2) {
+    if (flags & ~O_CLOEXEC_ || (!dup2 && f == new_f))
+        return _EINVAL;
+    struct fdtable *table = current->files;
+    lock(&table->lock);
+    struct fd *fd = fdtable_get(table, f);
+    int err = _EBADF;
+    if (!fd)
+        goto out;
+    if (f == new_f) { // Linux dup2: validate source, but preserve CLOEXEC/identity.
+        err = new_f;
+        goto out;
+    }
+    if (new_f < 0 || (unsigned) new_f >= rlimit(RLIMIT_NOFILE_))
+        goto out;
+    err = fdtable_expand(table, new_f);
+    if (err < 0)
+        goto out;
+    if (table->generation[new_f] == UINT64_MAX) {
+        err = _EOVERFLOW;
+        goto out;
+    }
+    fd_retain(fd);
+    fdtable_close(table, new_f);
+    ++table->generation[new_f];
+    table->files[new_f] = fd;
+    bit_clear(new_f, table->cloexec);
+    if (flags & O_CLOEXEC_)
+        bit_set(new_f, table->cloexec);
+    err = new_f;
+out:
+    unlock(&table->lock);
+    return err;
 }
 
 dword_t sys_dup3(fd_t f, fd_t new_f, int_t flags) {
     STRACE("dup3(%d, %d, %d)", f, new_f, flags);
-    struct fdtable *table = current->files;
-    struct fd *fd = f_get(f);
-    if (fd == NULL)
-        return _EBADF;
-    int err = fdtable_expand(table, new_f);
-    if (err < 0)
-        return err;
-    fd_retain(fd);
-    f_close(new_f);
-    table->files[new_f] = fd;
-    if (flags & O_CLOEXEC_)
-        bit_set(new_f, table->cloexec);
-    return new_f;
+    return dup_to(f, new_f, flags, false);
 }
 
 dword_t sys_dup2(fd_t f, fd_t new_f) {
-    return sys_dup3(f, new_f, 0);
+    return dup_to(f, new_f, 0, true);
 }
 
 int fd_getflags(struct fd *fd) {
@@ -329,26 +431,35 @@ int fd_setflags(struct fd *fd, int flags) {
 
 dword_t sys_fcntl(fd_t f, dword_t cmd, addr_t arg) {
     struct fdtable *table = current->files;
+    if (cmd == F_DUPFD_ || cmd == F_DUPFD_CLOEXEC_) {
+        lock(&table->lock);
+        struct fd *source = fdtable_get(table, f);
+        int result = _EBADF;
+        if (!source)
+            goto dup_out;
+        if ((sdword_t) arg < 0 || arg >= rlimit(RLIMIT_NOFILE_)) {
+            result = _EINVAL;
+            goto dup_out;
+        }
+        fd_retain(source);
+        result = f_install_start(table, source, arg);
+        if (result >= 0 && cmd == F_DUPFD_CLOEXEC_)
+            bit_set(result, table->cloexec);
+        unlock(&table->lock);
+        if (result < 0)
+            fd_close(source);
+        return result;
+dup_out:
+        unlock(&table->lock);
+        return result;
+    }
     struct fd *fd = f_get(f);
     if (fd == NULL)
         return _EBADF;
     struct flock32_ flock32;
     struct flock_ flock;
-    fd_t new_f;
     int err;
     switch (cmd) {
-        case F_DUPFD_:
-            STRACE("fcntl(%d, F_DUPFD, %d)", f, arg);
-            fd->refcount++;
-            return f_install_start(fd, arg);
-
-        case F_DUPFD_CLOEXEC_:
-            STRACE("fcntl(%d, F_DUPFD_CLOEXEC, %d)", f, arg);
-            fd->refcount++;
-            new_f = f_install_start(fd, arg);
-            bit_set(new_f, table->cloexec);
-            return new_f;
-
         case F_GETFD_:
             STRACE("fcntl(%d, F_GETFD)", f);
             return bit_test(f, table->cloexec);

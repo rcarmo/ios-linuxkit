@@ -9,6 +9,7 @@ CC ?= clang
 RELEASE_BUILD_DIR ?= build-arm64-linux
 DEBUG_BUILD_DIR ?= build-arm64-linux-debug
 NATIVE_BUILD_DIR ?= build-arm64-native-release
+PROFILE_BUILD_DIR ?= build-arm64-profile-exact
 AOT_RECORD_DIR ?= /workspace/tmp/ish-aot-targeted
 MESON_SETUP_ARGS ?=
 ROOTFS_DIR ?= $(CURDIR)/alpine-arm64-fakefs
@@ -88,8 +89,16 @@ build-arm64-linux-debug:
 build-arm64-native:
 	$(MAKE) build-arm64-linux RELEASE_BUILD_DIR="$(NATIVE_BUILD_DIR)" CC=clang MESON_SETUP_ARGS='-Djit=true'
 
-test-arm64-native-emitter: build-arm64-native
-	BUILD_DIR="$(abspath $(NATIVE_BUILD_DIR))" bun tests/arm64/native-aot/run.ts
+# Exact dispatch profiling must exercise a real gadget-only no-chain build,
+# not silently skip the runtime fixture when PROFILE_EXACT_BIN is unset.
+.PHONY: build-arm64-profile-exact
+build-arm64-profile-exact:
+	@test -f "$(PROFILE_BUILD_DIR)/build.ninja" || env -u NINJA CC=clang $(MESON) setup "$(PROFILE_BUILD_DIR)" -Dguest_arch=arm64 -Djit=false --buildtype=release -Dc_args='-DDISABLE_BLOCK_CHAINING=1 -DDISABLE_RET_CACHE=1'
+	env -u NINJA $(MESON) configure "$(PROFILE_BUILD_DIR)" -Dguest_arch=arm64 -Djit=false -Dc_args='-DDISABLE_BLOCK_CHAINING=1 -DDISABLE_RET_CACHE=1'
+	$(NINJA) -C "$(PROFILE_BUILD_DIR)"
+
+test-arm64-native-emitter: build-arm64-native build-arm64-profile-exact
+	BUILD_DIR="$(abspath $(NATIVE_BUILD_DIR))" PROFILE_EXACT_BIN="$(abspath $(PROFILE_BUILD_DIR))/ish" bun tests/arm64/native-aot/run.ts
 
 test-aot-generator:
 	bun test tests/arm64/native-aot/generator.test.ts
@@ -256,6 +265,21 @@ test-arm64-upstream: build-arm64-linux
 	ISH_BIN="$(CURDIR)/$(RELEASE_BUILD_DIR)/ish" \
 	ROOTFS="$(DEBIAN_ROOTFS_DIR)" \
 	./tests/arm64/upstream/run.sh
+
+.PHONY: test-arm64-import-fixes test-arm64-poll-fixes test-arm64-socket-ownership test-arm64-sha512-fallback test-arm64-tlb-stale
+test-arm64-import-fixes: test-arm64-poll-fixes test-arm64-socket-ownership test-arm64-sha512-fallback test-arm64-tlb-stale
+
+test-arm64-poll-fixes:
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" CC="$(CC)" bash tests/regress/run_poll_fixes.sh
+
+test-arm64-socket-ownership:
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" CC="$(CC)" bash tests/regress/run_socket_ownership_0912.sh
+
+test-arm64-sha512-fallback:
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" CC="$(CC)" bash tests/regress/run_sha512_fallback.sh
+
+test-arm64-tlb-stale: build-arm64-native
+	BUILD_DIR="$(abspath $(NATIVE_BUILD_DIR))" CC="$(CC)" bash tests/arm64/upstream/tlb-stale-run.sh
 
 .PHONY: test-arm64-offload-setup test-arm64-native-fs test-arm64-offload-context test-arm64-offload-io test-arm64-offload-local-copy
 test-arm64-offload-local-copy: build-arm64-linux

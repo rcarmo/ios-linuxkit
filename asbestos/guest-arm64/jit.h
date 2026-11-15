@@ -20,7 +20,8 @@
 // environment turns the translator off at run time (the BLR code stream keeps
 // its JIT layout). Tuning / diagnostics: ISH_JIT_PIN=0, ISH_JIT_LINK=0,
 // ISH_JIT_LOOP=0, ISH_JIT_SIMD=0, ISH_JIT_STATS=1, ISH_JIT_DUMP=<file>,
-// ISH_JIT_MAP=<file> (native code -> guest module and file offset).
+// ISH_JIT_MAP=<file> (native code -> guest module and file offset),
+// ISH_JIT_STUBS=0 (diagnostic inline PIC block-end slow paths).
 //
 // ISH_JIT_PIC=1 emits position-independent code (jit.c, "PIC"): nothing in it
 // depends on where the guest module or its blocks live, and a registry reuses
@@ -98,6 +99,13 @@ bool jit_chain_refused(struct fiber_block *from, int i, struct fiber_block *to);
 // Leave the thread's JIT write mode (if a compile or link entered it) before
 // running guest code.
 void jit_exec_ready(void);
+
+// Profiling identity independent of a file-backed module's load address.
+// Caller holds the guest address space read lock; no backend initialisation.
+int jit_prof_locate(struct tlb *tlb, addr_t pc, uint64_t *off);
+void jit_module_path(int mod, char *buf, size_t size);
+// Dispatch profiler's explicit guest-exit flush (host _exit skips atexit).
+void dump_block_prof(void);
 
 // Host fault: 1 = exact access checkpoint recovered; 0 = not native code;
 // -1 = unrecognised native fault, must NOT fall through to gadget/block replay.

@@ -2,6 +2,10 @@
 #define EMU_CPU_MEM_H
 
 #include "misc.h"
+#ifdef GUEST_ARM64
+#include "util/list.h"
+#include "util/sync.h"
+#endif
 
 // ARM64 page number type: 48-bit address space → 36-bit page numbers.
 typedef uint64_t page_t;
@@ -23,6 +27,11 @@ struct mmu {
     struct mmu_ops *ops;
     struct asbestos *asbestos;
     uint64_t changes;
+#ifdef GUEST_ARM64
+    // TLBs attached for a guest quantum; mapping changes mark all stale.
+    lock_t tlbs_lock;
+    struct list tlbs;
+#endif
 };
 
 #define MEM_READ 0

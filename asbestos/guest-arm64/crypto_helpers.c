@@ -8,6 +8,39 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#if defined(__APPLE__) && defined(__aarch64__)
+#include <sys/sysctl.h>
+#elif defined(__linux__) && defined(__aarch64__)
+#include <sys/auxv.h>
+#include <asm/hwcap.h>
+#endif
+
+/* FEAT_SHA512 is optional even on hosts with SHA1/SHA256. Never probe by
+ * executing it: an absent feature would SIGILL. Only "0" is an override;
+ * other values must not enable unsupported instructions. Works without JIT.
+ */
+unsigned char ish_host_sha512 = 0;
+
+__attribute__((constructor)) static void detect_host_sha512(void) {
+    const char *force = getenv("ISH_HOST_SHA512");
+    ish_host_sha512 = 0;
+    if (force != NULL && strcmp(force, "0") == 0)
+        return;
+#if defined(__APPLE__) && defined(__aarch64__)
+    int value = 0;
+    size_t size = sizeof(value);
+    if (sysctlbyname("hw.optional.arm.FEAT_SHA512", &value, &size, NULL, 0) != 0) {
+        value = 0;
+        size = sizeof(value);
+        if (sysctlbyname("hw.optional.armv8_2_sha512", &value, &size, NULL, 0) != 0)
+            return;
+    }
+    ish_host_sha512 = size == sizeof(value) && value != 0;
+#elif defined(__linux__) && defined(__aarch64__) && defined(HWCAP_SHA512)
+    ish_host_sha512 = (getauxval(AT_HWCAP) & HWCAP_SHA512) != 0;
+#endif
+}
 
 /* AES S-box */
 static const uint8_t aes_sbox[256] = {
@@ -513,10 +546,12 @@ static inline uint64_t sha512_s1(uint64_t x) {
 }
 
 void sha512su1_helper(uint64_t *vd, uint64_t *vn, uint64_t *vm) {
-    uint64_t d0 = vd[0];
-    uint64_t d1 = vd[1];
-    vd[0] = d0 + sha512_s1(vn[0]) + vm[0];
-    vd[1] = d1 + sha512_s1(vn[1]) + vm[1];
+    // Snapshot all inputs before stores, including overlapping source aliases.
+    uint64_t d0 = vd[0], d1 = vd[1];
+    uint64_t n0 = vn[0], n1 = vn[1];
+    uint64_t m0 = vm[0], m1 = vm[1];
+    vd[0] = d0 + sha512_s1(n0) + m0;
+    vd[1] = d1 + sha512_s1(n1) + m1;
 }
 
 /*

@@ -7,11 +7,12 @@
 #include "asbestos/frame.h"
 
 void tlb_refresh(struct tlb *tlb, struct mmu *mmu) {
-    if (tlb->mmu == mmu && tlb->mem_changes == mmu->changes)
+    uint64_t gen = __atomic_load_n(&mmu->changes, __ATOMIC_SEQ_CST);
+    if (tlb->mmu == mmu && tlb->mem_changes == gen)
         return;
 
     bool mmu_changed = (tlb->mmu != mmu);
-    bool mappings_changed = (tlb->mmu == mmu && tlb->mem_changes != mmu->changes);
+    bool mappings_changed = (tlb->mmu == mmu && tlb->mem_changes != gen);
 
     if (mmu_changed || mappings_changed) {
         // The persistent threaded-code caches contain host pointers into guest-code
@@ -34,17 +35,52 @@ void tlb_refresh(struct tlb *tlb, struct mmu *mmu) {
 
     tlb->mmu = mmu;
     tlb->dirty_page = TLB_PAGE_EMPTY;
-    tlb->mem_changes = mmu->changes;
+    tlb->mem_changes = gen;
     tlb_flush(tlb);
 }
 
+#ifdef GUEST_ARM64
+void tlb_attach(struct tlb *tlb, struct mmu *mmu) {
+    assert(tlb->attached == NULL);
+    lock(&mmu->tlbs_lock);
+    list_add(&mmu->tlbs, &tlb->tlbs_link);
+    tlb->attached = mmu;
+    unlock(&mmu->tlbs_lock);
+    // Clear before tlb_refresh reads changes: any change that read misses
+    // must subsequently mark this already-listed TLB stale again.
+    __atomic_store_n(&tlb->stale, 0, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+}
+
+void tlb_detach(struct tlb *tlb) {
+    struct mmu *mmu = tlb->attached;
+    if (mmu == NULL)
+        return;
+    lock(&mmu->tlbs_lock);
+    list_remove(&tlb->tlbs_link);
+    tlb->attached = NULL;
+    unlock(&mmu->tlbs_lock);
+}
+
+void mmu_tlbs_stale(struct mmu *mmu) {
+    lock(&mmu->tlbs_lock);
+    struct tlb *tlb;
+    list_for_each_entry(&mmu->tlbs, tlb, tlbs_link)
+        __atomic_store_n(&tlb->stale, TLB_STALE, __ATOMIC_SEQ_CST);
+    unlock(&mmu->tlbs_lock);
+}
+#endif
+
 void tlb_flush(struct tlb *tlb) {
-    tlb->mem_changes = tlb->mmu->changes;
+    tlb->mem_changes = __atomic_load_n(&tlb->mmu->changes, __ATOMIC_SEQ_CST);
     for (unsigned i = 0; i < TLB_SIZE; i++)
         tlb->entries[i] = (struct tlb_entry) {.page = 1, .page_if_writable = 1};
 }
 
 void tlb_free(struct tlb *tlb) {
+#ifdef GUEST_ARM64
+    tlb_detach(tlb);
+#endif
     if (tlb->frame != NULL)
         free(tlb->frame);
     free(tlb);
@@ -110,23 +146,28 @@ __no_instrument void *tlb_handle_miss(struct tlb *tlb, addr_t addr, int type) {
     // A write miss on a CoW page performs the copy inside mmu_translate, which
     // itself bumps mmu->changes; the retry then sees a stable generation once
     // the page is resolved. Bound the loop so a thread continuously remapping
-    // can't livelock us — after the cap we accept the latest consistent-enough
-    // translation (the per-block coherence check will still catch a later
-    // change).
+    // can't livelock us — after the cap return the last translation without
+    // caching it or relabelling older entries with a newer generation.
+    bool cacheable = true;
     for (int attempt = 0; ; attempt++) {
-        gen = __atomic_load_n(&tlb->mmu->changes, __ATOMIC_ACQUIRE);
+#ifdef GUEST_ARM64
+        // A change missed by the following generation read must mark us again.
+        __atomic_store_n(&tlb->stale, 0, __ATOMIC_SEQ_CST);
+#endif
+        gen = __atomic_load_n(&tlb->mmu->changes, __ATOMIC_SEQ_CST);
         if (gen != tlb->mem_changes)
             tlb_flush(tlb);
         tlb->mem_changes = gen;
         ptr = mmu_translate(tlb->mmu, TLB_PAGE(addr), type);
         // Re-read after translate; if unchanged, ptr is consistent with `gen`.
-        if (__atomic_load_n(&tlb->mmu->changes, __ATOMIC_ACQUIRE) == gen)
+        if (__atomic_load_n(&tlb->mmu->changes, __ATOMIC_SEQ_CST) == gen)
             break;
         if (attempt >= 8) {
-            // Refresh gen to the post-translate value so the entry we stamp is
-            // at least self-consistent with this last translation.
-            gen = __atomic_load_n(&tlb->mmu->changes, __ATOMIC_ACQUIRE);
-            tlb->mem_changes = gen;
+            tlb_flush(tlb);
+#ifdef GUEST_ARM64
+            __atomic_store_n(&tlb->stale, TLB_STALE, __ATOMIC_SEQ_CST);
+#endif
+            cacheable = false;
             break;
         }
         // Raced with a concurrent remap — retry with the fresh generation.
@@ -137,6 +178,8 @@ __no_instrument void *tlb_handle_miss(struct tlb *tlb, addr_t addr, int type) {
     }
 
     tlb->dirty_page = TLB_PAGE(addr);
+    if (!cacheable)
+        return ptr + PGOFFSET(addr);
 
     struct tlb_entry *tlb_ent = &tlb->entries[TLB_INDEX(addr)];
     tlb_ent->page = TLB_PAGE(addr);

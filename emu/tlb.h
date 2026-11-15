@@ -25,7 +25,11 @@ struct fiber_frame;
 struct tlb {
     struct mmu *mmu;
     page_t dirty_page;
-    unsigned mem_changes;
+    uint64_t mem_changes;
+#ifdef GUEST_ARM64
+    // ORed into inline lookup pages: bit 48 cannot match a guest page.
+    uint64_t stale;
+#endif
     // this is basically one of the return values of tlb_handle_miss, tlb_{read,write}, and __tlb_{read,write}_cross_page
     // yes, this sucks
     addr_t segfault_addr;
@@ -39,6 +43,10 @@ struct tlb {
 
     // Persistent fiber_frame (avoids malloc/free + ret_cache zeroing per syscall)
     struct fiber_frame *frame;
+#ifdef GUEST_ARM64
+    struct mmu *attached;
+    struct list tlbs_link;
+#endif
 };
 
 #define TLB_INDEX(addr) ((((addr >> PAGE_BITS) ^ (addr >> (PAGE_BITS + TLB_BITS))) & (TLB_SIZE - 1)))
@@ -49,6 +57,13 @@ struct tlb {
 #endif
 #define TLB_PAGE_EMPTY 1
 void tlb_refresh(struct tlb *tlb, struct mmu *mmu);
+#ifdef GUEST_ARM64
+#define TLB_STALE (1ull << 48)
+// Caller owns the mm and holds its read lock throughout the guest quantum.
+void tlb_attach(struct tlb *tlb, struct mmu *mmu);
+void tlb_detach(struct tlb *tlb);
+void mmu_tlbs_stale(struct mmu *mmu);
+#endif
 void tlb_free(struct tlb *tlb);
 void tlb_flush(struct tlb *tlb);
 void *tlb_handle_miss(struct tlb *tlb, addr_t addr, int type);
