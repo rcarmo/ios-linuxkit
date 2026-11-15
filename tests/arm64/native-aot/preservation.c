@@ -23,6 +23,35 @@ static void *executable(struct em *e) {
  memcpy(p,e->buf,e->n*4); __builtin___clear_cache((char *)p,(char *)(p+e->n));
  assert(mprotect(p,size,PROT_READ|PROT_EXEC)==0); return p;
 }
+static void checkpoint_snapshot_probe(void) {
+ // Execute the emitted snapshot against a separate canary-filled destination.
+ // This catches wrong slot offsets, nonconsecutive host-register assumptions,
+ // promotion holes, and stores to unpinned state.
+ for (unsigned mode=0; mode<4; mode++) {
+  pin_init(mode!=0); pic_on=false; struct em e; init_em(&e);
+  struct cpu_state source; memset(&source,0x37,sizeof(source));
+  for(int g=0;g<31;g++) source.regs[g]=0xfedcba9876543210ull ^ (0x102030405060708ull*(g+1));
+  source.sp=0x1122334455667788ull;
+  struct { uint64_t before[2]; struct cpu_state cpu; uint64_t after[2]; } got,expected;
+  memset(&got,0xa5,sizeof(got)); expected=got;
+  if(n_pinned)load_pinned(&e);
+  if(mode==2) { // promote x8 into the unused x19 pin, leaving a hole
+   e.loop=true; e.npromo=1; e.promo_g[0]=8; e.donor_g[0]=19; e.promo_h[0]=pin_of[19];
+   e.pin[19]=-1; e.pin[8]=pin_of[19]; emit_promote(&e);
+  }
+  if(mode==3) for(int g=0;g<=G_SP;g++) if(g!=0 && g!=1 && g!=30 && g!=G_SP)e.pin[g]=-1;
+  put(&e,0xaa0203e1); // mov x1,x2: snapshot into canaries, not source
+  unsigned start=e.n; emit_pinned_snapshot(&e); unsigned words=e.n-start;
+  if(mode==0)assert(words==0);
+  if(mode==1)assert(words==9); // old scalar snapshot: 16 words
+  if(mode==3)assert(words==3); // pair x0/x1; scalar x30 and SP
+  for(int g=0;g<=G_SP;g++)if(e.pin[g]>=0)
+   memcpy((char *)&expected.cpu+greg_off(g),(char *)&source+greg_off(g),8);
+  put(&e,0xd65f03c0);void *code=executable(&e);probe_call(code,&source,&got.cpu);
+  assert(!memcmp(&expected,&got,sizeof(got)));munmap(code,65536);
+ }
+ puts("checkpoint-pairs-ok: 16->9 GPR stores; unpinned/promoted/sparse/canary parity");
+}
 static void saturation_probe(void) {
  pin_init(false); simd_on=true; pic_on=false;
  // A table of integer/vector emit cases to check acceptance, flags and results.
@@ -120,4 +149,25 @@ static void moved_probe(void) {
 #else
 static void moved_probe(void){}
 #endif
-int main(void) { saturation_probe(); simd_filter_probe(); differential_probe(); memory_probe(); moved_probe(); slot_probe(); puts("PRESERVATION_OK"); }
+// Branch-bound tests may emit these addresses but must never execute them.
+void jit_fiber_ret(void) { abort(); }
+void jit_fiber_ret_chain(void) { abort(); }
+static void buffer_bounds_probe(void) {
+ pin_init(true);pic_on=false;
+ struct em e;init_em(&e);e.buf[0]=0x54000000u;
+ patch_here(&e,0);assert(e.fail && e.n==0 && e.buf[0]==0x54000000u);
+ init_em(&e);e.n=1;e.buf[0]=0x54000000u;e.fail=true;
+ patch_here(&e,0);assert(e.fail && e.n==1 && e.buf[0]==0x54000000u);
+ const uint32_t branches[]={0x34000000u,0xb5000000u,0x36000000u,0xb7080000u,0x54000000u};
+ unsigned long jumps[]={0x1008,0x1004};
+ struct fiber_block b={.addr=0x1000,.jump_ip={&jumps[0],&jumps[1]}};
+ for(unsigned i=0;i<sizeof(branches)/sizeof(*branches);i++) {
+  init_em(&e);e.n=sizeof(e.buf)/sizeof(*e.buf);e.hflags=true;
+  struct jit_unit u={.n=1,.pc=0x1000,.w={branches[i]}};
+  assert(!emit_block_end(&e,&b,&u));
+  assert(e.fail && e.n==sizeof(e.buf)/sizeof(*e.buf));
+ }
+ puts("emitter full-buffer branch/patch rejection PASS");
+}
+#include "stream-probes.h"
+int main(void) { buffer_bounds_probe(); checkpoint_snapshot_probe(); saturation_probe(); simd_filter_probe(); differential_probe(); memory_probe(); stream_probe(); simd_dup_probe(); moved_probe(); slot_probe(); puts("PRESERVATION_OK"); }

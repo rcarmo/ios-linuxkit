@@ -261,6 +261,8 @@ def main():
     NO_LINKS = args.no_links
 
     header, trans = load_recording(args.recording)
+    if header.get('region_exhausted') or header.get('region_full'):
+        sys.exit('incomplete recording: code arena exhausted; record the target module alone or shard it')
     abi = header.get('abi') or (int(args.abi, 16) if args.abi else None)
     if not abi:
         sys.exit(f"❌ {args.recording}: no abi in the header; re-record, or pass --abi of the ish that made it")

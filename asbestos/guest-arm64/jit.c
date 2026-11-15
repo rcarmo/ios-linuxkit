@@ -343,7 +343,7 @@ static unsigned greg_off(int g) {
 // host register holding guest register g (0..30 or G_SP), loading it on first
 // use. Lazy registers are written through, so when the pool is full a mapping
 // not used by the current instruction can simply be dropped.
-static int hreg(struct em *e, int g) {
+static int hreg_access(struct em *e, int g, bool read) {
     if (e->uses[g] < 0xffff) e->uses[g]++;
     if (e->pin[g] >= 0)
         return e->pin[g];
@@ -372,8 +372,13 @@ static int hreg(struct em *e, int g) {
     e->host[g] = (int8_t) h;
     e->owner[h] = (int8_t) g;
     e->locked |= 1u << h;
-    put(e, 0xF9400000u | ((greg_off(g) / 8) << 10) | (1u << 5) | (uint32_t) h);  // ldr xh, [x1, #off]
+    if (read)
+        put(e, 0xF9400000u | ((greg_off(g) / 8) << 10) | (1u << 5) | (uint32_t) h);  // ldr xh, [x1, #off]
     return h;
+}
+
+static int hreg(struct em *e, int g) {
+    return hreg_access(e, g, true);
 }
 
 static void writeback(struct em *e, int g) {
@@ -687,9 +692,12 @@ static uint32_t remap(struct em *e, uint32_t x, int kd, int kn, int km, int ka, 
         } else {
             g = r;
         }
+        // A full destination overwrite does not need its old backing value.
+        // Sources are mapped first, so aliases and MOVK/BFM still retain it.
+        // Keep write-through semantics: no new dirty state at bailout sites.
         if (f != 0 || rd_read)
-            (void) hreg(e, g);
-        int h = hreg(e, g);
+            (void) hreg(e, g); // retain existing loop-promotion use weighting
+        int h = hreg_access(e, g, f != 0 || rd_read);
         out = (out & ~(31u << shift[f])) | ((uint32_t) h << shift[f]);
         if (f == 0)
             *wrote = g;
@@ -740,10 +748,28 @@ _Static_assert(offsetof(struct fiber_frame, native_fault_host_pc) % 8 == 0 &&
     offsetof(struct fiber_frame, native_fault_guest_pc) % 8 == 0 &&
     offsetof(struct fiber_frame, native_fault_addr) % 8 == 0 &&
     offsetof(struct fiber_frame, native_fault_write) % 8 == 0, "checkpoint alignment");
+// Pair adjacent backing slots, not adjacent host registers. Inspired by
+// Crate's register-cache sync; keep every pinned/promoted value unconditional:
+// a hot predecessor may have changed it without updating the backing state.
+// Never pair across the checkpoint arm/access/disarm protocol below.
+static void emit_pinned_snapshot(struct em *e) {
+    for (int g = 0; g <= G_SP; g++) {
+        if (e->pin[g] < 0)
+            continue;
+        unsigned off = greg_off(g);
+        if (g < G_SP && e->pin[g + 1] >= 0 && greg_off(g + 1) == off + 8 &&
+                off % 8 == 0 && off / 8 < 64) {
+            put(e, 0xA9000000u | ((off / 8) << 15) | ((uint32_t) e->pin[g + 1] << 10) |
+                (1u << 5) | (uint32_t) e->pin[g]); // stp xh,xh2,[x1,#off]
+            g++;
+        } else {
+            put(e, 0xF9000000u | ((off / 8) << 10) | (1u << 5) | (uint32_t) e->pin[g]);
+        }
+    }
+}
+
 static void emit_guest_access(struct em *e, uint32_t insn, bool write) {
-    for (int g = 0; g <= G_SP; g++)
-        if (e->pin[g] >= 0)
-            put(e, 0xF9000000u | ((greg_off(g) / 8) << 10) | (1u << 5) | (uint32_t) e->pin[g]);
+    emit_pinned_snapshot(e);
     if (n_pinned)
         put(e, 0xB9000000u | ((CPU_cycle / 4) << 10) | (1u << 5) | H_CYC);
     // x9 is the translated pointer; x11 still holds data_minus_addr.
@@ -785,6 +811,15 @@ enum { V_N = 16, V_M = 17, V_D = 18, V_T = 19 };   // table registers: v19..v22
 static bool emit_simd(struct em *e, uint32_t x) {
     int rd = x & 31, rn = (x >> 5) & 31, rm = (x >> 16) & 31;
     uint32_t base = x & ~0x001F03FFu;   // opcode with rd/rn/rm cleared
+    if ((x & 0xBFE0FC00u) == 0x0E000400u) {                                   // dup (element, vector)
+        unsigned imm5 = (x >> 16) & 31;
+        // Lowest set bit selects size. 00000/10000 and Q=0,D are reserved.
+        if (!(imm5 & 15) || (!(imm5 & 7) && !(x & 0x40000000u))) return false;
+        vload(e, V_N, rn);
+        put(e, (x & ~0x3FFu) | (V_N << 5) | V_D);
+        vstore(e, V_D, rd);
+        return true;
+    }
     if ((x & 0xBFE0FC00u) == 0x0E000C00u) {                                   // dup (general)
         if ((x & 0x000F0000u) == 0 || (((x >> 16) & 0xF) == 8 && !(x & 0x40000000u))) return false;
         int hn = rn == 31 ? 31 : hreg(e, rn);
@@ -1350,6 +1385,7 @@ void jit_unlink(struct fiber_block *from, int i) {
 
 // Patch the branch at `at` (b.cond / cbz / tbz / b) to jump to the current end.
 static void patch_here(struct em *e, unsigned at) {
+    if (e->fail || at >= e->n) { e->fail = true; return; }
     int64_t d = (int64_t) e->n - (int64_t) at;   // words
     uint32_t x = e->buf[at];
     if ((x & 0x7E000000u) == 0x36000000u) {                                     // tbz/tbnz
@@ -1764,6 +1800,7 @@ static bool emit_block_end(struct em *e, struct fiber_block *b, const struct jit
         int h = hreg(e, rt);
         to_taken = e->n;
         put(e, (x & 0xFF000000u & ~(0u)) | (uint32_t) h);                   // cbz/cbnz/tbz/tbnz (same bit/size), offset patched
+        if (to_taken >= e->n) { e->fail = true; return false; }
         if (is_tbz) e->buf[to_taken] = (x & 0xFFF80000u) | (uint32_t) h;    // keep b5/b40
         else e->buf[to_taken] = (x & 0xFF000000u) | (uint32_t) h;
     }
@@ -2216,7 +2253,7 @@ void ish_aot_register(const struct aot_module *m) {
 
 // Bump whenever the code emitted for some guest instruction, stub or exit
 // changes: images made before would still pass every other check.
-#define JIT_CODE_VERSION 12
+#define JIT_CODE_VERSION 13
 
 // Everything the emitted code bakes in besides the gadgets it names: the
 // conventions, the struct layouts it loads from and the TLB / block cache
@@ -3437,8 +3474,10 @@ static void jit_init(void) {
     rec_file = pic_on && have_region ? getenv("ISH_JIT_RECORD") : NULL;
     rec_mod = getenv("ISH_JIT_RECORD_MOD") ? getenv("ISH_JIT_RECORD_MOD") : "ld-musl";
     rec_mod_exact = getenv("ISH_JIT_RECORD_MOD_EXACT") && strcmp(getenv("ISH_JIT_RECORD_MOD_EXACT"), "1") == 0;
-    rec_target_only = rec_file && getenv("ISH_JIT_RECORD_TARGET_ONLY") &&
-        strcmp(getenv("ISH_JIT_RECORD_TARGET_ONLY"), "1") == 0;
+    // Do not spend the recording arena on unrelated modules by default.
+    // Explicit zero remains available for diagnostic comparisons.
+    rec_target_only = rec_file && (!getenv("ISH_JIT_RECORD_TARGET_ONLY") ||
+        strcmp(getenv("ISH_JIT_RECORD_TARGET_ONLY"), "1") == 0);
     if (rec_target_only && (getenv("ISH_JIT_RECORD_SHARDS") || getenv("ISH_JIT_RECORD_SHARD"))) {
         const char *count = getenv("ISH_JIT_RECORD_SHARDS");
         const char *part = getenv("ISH_JIT_RECORD_SHARD");

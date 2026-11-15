@@ -1,6 +1,7 @@
 #ifndef SIGNAL_H
 #define SIGNAL_H
 
+#include <stddef.h>
 #include "misc.h"
 #include "util/list.h"
 #include "util/sync.h"
@@ -258,6 +259,7 @@ struct sigcontext_ {
     // layout for implicit null-check recovery.
     uint8_t __reserved[4096] __attribute__((aligned(16)));
 };
+_Static_assert(offsetof(struct sigcontext_, __reserved) == 288, "AArch64 signal extension alignment");
 
 struct ucontext_ {
     uint64_t flags;
@@ -267,6 +269,7 @@ struct ucontext_ {
     uint8_t __padding[128 - sizeof(sigset_t_)];  // Pad to fixed offset
     struct sigcontext_ mcontext;
 };
+_Static_assert(offsetof(struct ucontext_, mcontext) == 176, "AArch64 ucontext ABI");
 
 struct sigframe_ {
     addr_t restorer;

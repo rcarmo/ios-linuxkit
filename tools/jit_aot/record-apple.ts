@@ -24,7 +24,7 @@ const workload = `set -eu
 i=0; while [ "$i" -lt 1000 ]; do i=$((i+1)); done
 test "$i" = 1000
 /bin/busybox printf 'busybox-ok\\n' | /bin/busybox grep -qx busybox-ok
-test "$(/usr/local/bin/bun --version)" = 1.4.2
+test "$(/usr/local/bin/bun --version)" = 1.4.4
 /usr/local/bin/bun -e 'import {createCipheriv,createDecipheriv} from "node:crypto"; let sum=0; for(let i=0;i<10000;i++)sum+=i; if(JSON.parse(JSON.stringify({sum})).sum!==49995000)throw Error("sum"); const key=Buffer.alloc(16),iv=Buffer.alloc(12); for(let i=0;i<100;i++){const c=createCipheriv("aes-128-gcm",key,iv);const data=Buffer.concat([c.update("aot-test"),c.final()]);const d=createDecipheriv("aes-128-gcm",key,iv);d.setAuthTag(c.getAuthTag());if(Buffer.concat([d.update(data),d.final()]).toString()!=="aot-test")throw Error("crypto");} console.log("BUN_TRAIN_OK")'
 printf 'APPLE_AOT_TRAIN_OK\\n'
 `;
@@ -63,7 +63,7 @@ for (const module of order) {
     const rows = readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     const header = rows.shift()?.header;
     matchContract(header, contract, binaryHash);
-    if (go && header.region_exhausted !== false)
+    if (header.region_exhausted !== false)
         throw Error(`incomplete ${module.name} recording: code arena exhausted or recorder lacks capacity diagnostics`);
     if (!rows.length || rows.some(row => row.header || row.mod !== module.path) || !rows.some(row => row.segs?.length))
         throw Error('invalid/empty recording');

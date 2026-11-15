@@ -5,9 +5,9 @@ app. The app does not generate executable code while running. Code without a
 matching translation uses the normal interpreter.
 
 The `iSH-ARM64-AOT-Bootstrap` scheme builds a separate test app containing
-Alpine 3.24.2, Bun 1.4.2 and Alpine Go 1.26.8-r0. xterm is the default
-terminal; Ghostty remains available. The reference ARM64 schemes keep the
-normal interpreter.
+Alpine 3.24.2, Bun 1.4.4 (Linux ARM64 musl) and Alpine Go 1.26.8-r0.
+xterm is the default terminal; Ghostty remains available. The reference
+ARM64 schemes keep the normal interpreter.
 
 ## Requirements
 
@@ -65,8 +65,16 @@ bun tools/jit_aot/record-apple.ts "$DARWIN_RECORDER" "$FAKEFS" \
 
 Use a new output directory. A mismatch is a build error: rebuild the recorder
 or use the matching guest files and record again. Never change compatibility
-values to make an old recording pass. Version 2.5.0 requires fresh translations
-after the Bun/Pi runtime fixes.
+values to make an old recording pass. The Bun 1.4.4 update requires fresh
+recordings against the exact bundled binary and current runtime contract.
+Do not re-label Bun 1.4.2 recordings, images or benchmark results as 1.4.4;
+dated reports retain their original versions and observations.
+
+The [15 November Linux audit](reports/audits/CRATE_OPENMINIS_2026-11-15.md)
+records a passing fresh Bun 1.4.4 five-image no-emitter gate with gadget-mode
+workload parity. It does not validate an Apple target layout, signed app or
+physical device. Recordings now default to the selected module only, and
+exhausted arenas are rejected; use the existing Go compiler shards when needed.
 
 ## Build the accelerated app
 
@@ -98,7 +106,14 @@ without Bun or Go are not changed automatically.
 Package upgrades may replace files used by the translations. Unmatched code
 uses the interpreter. Do not overwrite user files to force a match.
 `BUN_ARCHIVE_PATH` can supply a previously downloaded Bun archive; its checksum
-is still verified. Run `make test-bun-rootfs` to check packaging.
+is still verified. The pinned upstream archive is
+`https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-aarch64-musl.zip`,
+with SHA-256
+`57f01b02ac7113c61c935f28f38c2eab849e3c970dab21f8b640a87b1ef65009`
+(verified against the release API asset digest). Run `make test-bun-rootfs` to
+check packaging, metadata and strict recorder version gates.
+This musl AOT pin is separate from the Makefile's generic glibc benchmark lane
+(`BUN_VERSION ?= 1.3.13`); changing that lane requires its own validation.
 
 Go comes from the checksum-pinned Alpine 3.24 ARM64 `go-1.26.8-r0.apk`,
 not a separate upstream Go distribution. `GO_APK_PATH` supplies a local copy;
@@ -155,6 +170,8 @@ foreground/background transitions and repeated Bun/Pi workloads. Compare
 startup time, sustained performance and memory use with the ordinary app
 using the same filesystem.
 
-The accelerated build is experimental. Mac tests and successful signing do
+The accelerated build is experimental. Physical-device validation of the
+Bun 1.4.4 update is pending; this package pin is not evidence that the reported
+Bun/Pi iPhone crash is fixed. Mac tests and successful signing do
 not establish stability or performance on a physical device. Keep an ordinary
 interpreter build available until those checks pass.

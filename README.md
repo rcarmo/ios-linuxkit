@@ -100,7 +100,8 @@ translations use the interpreter.
 ### iPhone and iPad
 
 The `iSH-ARM64-AOT-Bootstrap` scheme builds a separate experimental app with
-Alpine 3.24.2, Bun 1.4.2 and Go 1.26.8-r0. It includes AOT support for:
+Alpine 3.24.2, Bun 1.4.4 (Linux ARM64 musl) and Go 1.26.8-r0. It includes
+AOT support for:
 
 | Component | Supported code |
 |---|---|
@@ -118,7 +119,9 @@ unless they have their own matching AOT translations.
 Follow the [accelerated iOS build guide](docs/NATIVE_AOT_IOS.md) for recording,
 building, signing and device checks. The ordinary iOS schemes continue to use
 the interpreter. The accelerated build remains experimental, and the reported
-Bun/Pi iPhone crash is still under investigation.
+Bun/Pi iPhone crash is still under investigation. Bun 1.4.4 requires fresh
+recordings against the exact bundled binary, not re-labelled older images or
+benchmark results. Physical-device validation of this update is pending.
 
 App updates preserve existing Linux files and installed packages. Existing
 filesystems do not gain Bun or Go automatically. Package upgrades can replace

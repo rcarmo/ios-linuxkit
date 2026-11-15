@@ -14,7 +14,7 @@ if [ -n "${BUN_ARCHIVE_PATH:-}" ]; then
 else
     bun_archive="$stage/bun.zip"
     curl --fail --location --retry 2 --output "$bun_archive" \
-        https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-aarch64-musl.zip
+        https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-aarch64-musl.zip
 fi
 for name in libgcc libstdc++; do
     curl --fail --location --retry 2 --output "$stage/$name.apk" \

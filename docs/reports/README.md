@@ -13,6 +13,9 @@ package versions and commands may be outdated. Use the
 
 ## Recent reports
 
+- [Crate/OpenMinis follow-up and Bun 1.4.4](audits/CRATE_OPENMINIS_2026-11-15.md):
+  emitter reductions, paired host timings, fresh Linux no-emitter proof and
+  remaining upstream/device work.
 - [Apple AOT and Bun/Pi](audits/APPLE_AOT_2026-10-04.md): current functionality,
   runtime fixes and device-testing limits.
 - [Bun/Pi tests](benchmarks/PI_BUN_DARWIN_2026-10-04.md): Bun and Pi behavior

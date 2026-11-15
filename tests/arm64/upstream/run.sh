@@ -30,6 +30,12 @@ BUILD_DIR=$(dirname "$ISH_BIN")
 HOST_DEFS=(-DGUEST_ARM64=1 -DENGINE_ASBESTOS=1)
 if grep -q -- "-DISH_JIT=1" "$BUILD_DIR/compile_commands.json"; then HOST_DEFS+=(-DISH_JIT=1); fi
 libs=(-Wl,--start-group "$BUILD_DIR/libish.a" "$BUILD_DIR/libish_emu.a" "$BUILD_DIR/libfakefs.a" -Wl,--end-group -lrt -lm -ldl -lsqlite3)
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/proc-format.c" -Wl,--wrap=malloc -Wl,--wrap=vsnprintf "${libs[@]}" -o "$TMP/proc-format"
+check "$TMP/proc-format.log" 'proc-format-bounds-ok' "$TMP/proc-format"
+"$CC" -O2 -Wall -Wextra -Werror "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
+    "$HERE/poll-membership.c" -Wl,--wrap=pthread_mutex_lock "${libs[@]}" -o "$TMP/poll-membership"
+check "$TMP/poll-membership.log" 'poll-membership-lock-ok' "$TMP/poll-membership"
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \
     "$HERE/task-start.c" -Wl,--wrap=pthread_create "${libs[@]}" -o "$TMP/task-start"
 "$CC" -O2 "${HOST_DEFS[@]}" -I"$PROJECT" -I"$BUILD_DIR" -pthread \

@@ -12,12 +12,17 @@ reference_call:
  ldp x2,x3,[x19,#32]
  ldp x4,x5,[x19,#48]
  ldp x6,x7,[x19,#64]
+ // Stream oracle also exercises more than the three lazy-pool registers.
+ ldp x9,x10,[x19,#88]
+ ldp x11,x12,[x19,#104]
  ldr x8,[sp,#16]
  blr x8
  stp x0,x1,[x19,#16]
  stp x2,x3,[x19,#32]
  stp x4,x5,[x19,#48]
  stp x6,x7,[x19,#64]
+ stp x9,x10,[x19,#88]
+ stp x11,x12,[x19,#104]
  mrs x0,nzcv
  ldp x19,x30,[sp],#32
  ret

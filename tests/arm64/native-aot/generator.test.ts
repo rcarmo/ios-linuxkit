@@ -29,6 +29,15 @@ test('invalid and empty recordings fail closed without an image',async()=>{
   expect(r.exitCode).not.toBe(0);expect(await Bun.file(out).exists()).toBe(false);
  }
 });
+test('exhausted arenas fail closed for local and upstream recording headers',async()=>{
+ for(const field of ['region_exhausted','region_full']) {
+  const record=join(dir,field+'.jsonl'),out=join(dir,field+'.S');
+  await Bun.write(record,JSON.stringify({header:{abi:0xd5483d56,[field]:true}})+'\n'+JSON.stringify({mod:'/lib/x'})+'\n');
+  const r=Bun.spawnSync(['python3',join(root,'tools/jit_aot/gen.py'),record,'/missing-ish','/missing-root',out],{stdout:'pipe',stderr:'pipe'});
+  expect(r.exitCode).not.toBe(0);expect(r.stderr.toString()).toContain('code arena exhausted');
+  expect(await Bun.file(out).exists()).toBe(false);
+ }
+});
 test('targeted recorder propagates failures and never publishes a manifest',async()=>{
  const ish=join(dir,'failing-ish');await Bun.write(ish,'#!/bin/sh\nprintf "%s\\n" "$@"\necho workload-failed >&2\nexit 37\n');
  Bun.spawnSync(['chmod','+x',ish]);const out=join(dir,'failed');

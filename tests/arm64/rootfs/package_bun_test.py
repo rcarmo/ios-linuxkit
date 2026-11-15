@@ -1,6 +1,9 @@
+import hashlib
 import importlib.util
 import io
+import json
 from pathlib import Path
+import re
 import struct
 import tarfile
 import tempfile
@@ -45,6 +48,29 @@ class BunPackagingTests(unittest.TestCase):
         package_bun.package(self.archive, self.zip, self.output, package_bun.sha256(self.archive),
                             bun_hash or package_bun.sha256(self.zip))
 
+    def test_release_pin_download_url_and_strict_recorder_gates_agree(self):
+        self.assertEqual(package_bun.BUN_VERSION, "1.4.4")
+        self.assertEqual(package_bun.BUN_ARCHIVE_SHA256,
+                         "57f01b02ac7113c61c935f28f38c2eab849e3c970dab21f8b640a87b1ef65009")
+        root = Path(__file__).resolve().parents[3]
+        download = (root / "app/download-aot-root.sh").read_text()
+        urls = re.findall(r"https://github\.com/oven-sh/bun/releases/download/\S+", download)
+        self.assertEqual(urls, [f"https://github.com/oven-sh/bun/releases/download/"
+                                f"bun-v{package_bun.BUN_VERSION}/bun-linux-aarch64-musl.zip"])
+        self.assertIn('python3 "$SRCROOT/scripts/package-bun-rootfs.py"', download)
+        targeted = (root / "tools/jit_aot/targeted.ts").read_text()
+        self.assertIn(f"if (bun.stdout.trim() !== '{package_bun.BUN_VERSION}') "
+                      f"throw new Error('Bun training requires exact version {package_bun.BUN_VERSION}');",
+                      targeted)
+        apple = (root / "tools/jit_aot/record-apple.ts").read_text()
+        self.assertIn(f'test "$(/usr/local/bin/bun --version)" = {package_bun.BUN_VERSION}\n', apple)
+
+    def test_default_checksum_rejects_unpinned_archive(self):
+        self.output.write_bytes(b"previous archive")
+        with self.assertRaisesRegex(ValueError, "Bun archive SHA"):
+            package_bun.package(self.archive, self.zip, self.output, package_bun.sha256(self.archive))
+        self.assertEqual(self.output.read_bytes(), b"previous archive")
+
     def test_preserves_bytes_modes_owners_and_links(self):
         self.package()
         with tarfile.open(self.output) as archive:
@@ -52,7 +78,15 @@ class BunPackagingTests(unittest.TestCase):
             self.assertEqual(archive.getmember("./bin/busybox").uid, 42)
             self.assertEqual(archive.getmember("./bin/sh").linkname, "busybox")
             self.assertEqual(archive.getmember("./usr/local/bin/bun").mode, 0o755)
-            self.assertIn(b'"version": "1.4.2"', archive.extractfile("./usr/share/linuxkit/bun.json").read())
+            metadata = json.load(archive.extractfile("./usr/share/linuxkit/bun.json"))
+            self.assertEqual(metadata, {
+                "version": "1.4.4",
+                "archiveSha256": package_bun.sha256(self.zip),
+                "binarySha256": hashlib.sha256(
+                    archive.extractfile("./usr/local/bin/bun").read()).hexdigest(),
+                "platform": "linux-aarch64-musl",
+                "runtimePackages": [],
+            })
 
     def test_failed_checksum_preserves_previous_archive(self):
         self.output.write_bytes(b"previous archive")
@@ -97,6 +131,9 @@ class BunPackagingTests(unittest.TestCase):
         with tarfile.open(self.output) as archive:
             self.assertEqual(archive.extractfile("usr/lib/libgcc_s.so.1").read(), b"library")
             self.assertEqual(archive.getmember("usr/lib/libstdc++.so.6").linkname, "libstdc++.so.6.0.34")
+            metadata = json.load(archive.extractfile("./usr/share/linuxkit/bun.json"))
+            self.assertEqual(metadata["runtimePackages"], packages)
+            self.assertEqual(metadata["version"], package_bun.BUN_VERSION)
 
     def test_runtime_checksum_failure_preserves_previous_archive(self):
         self.output.write_bytes(b"previous archive")

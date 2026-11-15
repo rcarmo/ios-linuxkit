@@ -13,8 +13,8 @@ import tarfile
 import tempfile
 import zipfile
 
-BUN_VERSION = "1.4.2"
-BUN_ARCHIVE_SHA256 = "71760b6c8ea30623b81a4907cb815d48e2ea266f2e73e751534a44a0607950df"
+BUN_VERSION = "1.4.4"
+BUN_ARCHIVE_SHA256 = "57f01b02ac7113c61c935f28f38c2eab849e3c970dab21f8b640a87b1ef65009"
 BUN_MEMBER = "bun-linux-aarch64-musl/bun"
 RUNTIME_PACKAGES = [
     {"name": "libgcc", "version": "15.2.0-r5",

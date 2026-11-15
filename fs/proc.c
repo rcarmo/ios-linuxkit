@@ -269,13 +269,31 @@ void proc_buf_append(struct proc_data *buf, const void *data, size_t size) {
     proc_buf_write(buf, data, size, buf->size);
 }
 
+// Adapted from OpenMinis/ish-arm64 abaa7144: vsnprintf returns the required
+// length, which can exceed the stack buffer (notably for native/AOT stats).
 void proc_printf(struct proc_data *buf, const char *format, ...) {
     char data[4096];
-    va_list args;
+    va_list args, copy;
     va_start(args, format);
-    size_t size = vsnprintf(data, sizeof(data), format, args);
+    va_copy(copy, args);
+    int size = vsnprintf(data, sizeof(data), format, args);
     va_end(args);
-    proc_buf_append(buf, data, size);
+    if (size > 0 && (size_t) size < sizeof(data)) {
+        proc_buf_append(buf, data, (size_t) size);
+    } else if (size > 0) {
+        char *full = malloc((size_t) size + 1);
+        if (full != NULL) {
+            int written = vsnprintf(full, (size_t) size + 1, format, copy);
+            if (written > 0)
+                proc_buf_append(buf, full, (size_t) (written < size ? written : size));
+            free(full);
+        } else {
+            // Preserve the existing best-effort interface without reading
+            // past initialized bytes when the larger allocation fails.
+            proc_buf_append(buf, data, sizeof(data) - 1);
+        }
+    }
+    va_end(copy);
 }
 
 const struct fs_ops procfs = {

@@ -49,7 +49,7 @@ if (includeBun) {
     const bun = run([ish, '-f', root, '/usr/local/bin/bun', '--version'], { ISH_JIT: '0' });
     await Bun.write(join(out, 'bun-inventory.log'), bun.stdout + bun.stderr);
     requireOK(bun, 'Bun inventory');
-    if (bun.stdout.trim() !== '1.4.2') throw new Error('Bun training requires exact version 1.4.2');
+    if (bun.stdout.trim() !== '1.4.4') throw new Error('Bun training requires exact version 1.4.4');
     Object.assign(modules, { bun: '/usr/local/bin/bun' });
     bunInventory = bun.stdout;
 }

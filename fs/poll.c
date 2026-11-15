@@ -114,7 +114,12 @@ static void poll_fd_free(struct poll_fd *poll_fd) {
 }
 
 bool poll_has_fd(struct poll *poll, struct fd *fd, int fd_no) {
-    return poll_find_fd(poll, fd, fd_no) != NULL;
+    // OpenMinis/ish-arm64 7710898f: membership traversal must serialize
+    // with deletion. This does not itself retain the caller's fd objects.
+    lock(&poll->lock);
+    bool found = poll_find_fd(poll, fd, fd_no) != NULL;
+    unlock(&poll->lock);
+    return found;
 }
 
 int poll_add_fd(struct poll *poll, struct fd *fd, int fd_no, int types, union poll_fd_info info) {
