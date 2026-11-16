@@ -23,13 +23,25 @@ paths, **not** an RSS ceiling, OOM guarantee or iOS jetsam protection.
   prototype, there is **no automatic sample-based settlement**. Debt remains on
   `struct data` through partial unmaps and fork sharing, and is released only
   after successful final host `munmap`. Protection downgrade does not release
-  backing or debt. Repeated upgrades can accumulate conservative debt.
+  backing or debt.
+- The first protection upgrade reserves the entire host-rounded anonymous
+  allocation maximum. An atomic backing claim serializes reservation,
+  `mprotect`, commit and failure rollback across address spaces; subsequent
+  aliases do not duplicate this backing debt. Logical alias charges remain
+  independent. This is deliberately conservative: a small upgrade inside a
+  large PROT_NONE allocation can be refused against the full backing maximum.
+- Under the memory write lock, protection/reservation mutations publish once
+  per operation, including completed prefixes before a later failure. No-op
+  operations do not publish. TLB invalidation and partial-failure semantics
+  remain mandatory; see the [optimisation evidence](reports/audits/AOT_RSS_OPTIM_2026-11-16.md).
 - Existing resident backing may be counted both by headroom and retained debt.
   This knowingly refuses earlier; optimising settlement requires residency or
   equivalent evidence, not merely a newer `memory.current` reading.
 - Mode changes invalidate samples and refuse outstanding transactions; they do
   not erase debt attached to live backing. Disabled-mode tickets acquire no new
-  pressure debt, but retain ordinary logical-cap behaviour.
+  pressure debt, but retain ordinary logical-cap behaviour. Disabled tickets
+  avoid the global policy mutex and pin disabled mode using an atomic count;
+  mode changes CAS the idle state, closing the acquisition/enable race.
 - Each capture has an internal monotonic start timestamp and nonwrapping
   generation. Only the latest capture may publish, once, within two seconds.
   Invalid or absent samples refuse new positive-byte admission. An obsolete

@@ -2076,9 +2076,16 @@ static int gen_dp_imm(struct gen_state *state, uint32_t insn) {
                     if (add_rn == rd && add_rd == rd) {
                         state->ip += 4;
                         ARM64_FUSION_STAT_INC(arm64_fusion_adrp_add_count);
-                        gen(state, (unsigned long) gadget_fused_adrp_add);
-                        gen(state, rd | ((uint64_t)add_imm12 << 8));
-                        gen(state, target & 0xffffffffffffULL);
+                        // The existing fused gadget masks the sum to 48 bits.
+                        // Fold exactly that operation at compile time and use
+                        // ADR's existing packed-address stream: two words, not
+                        // three, with no runtime addition/intermediate write.
+                        // Still consume both guest instructions: jit_step_end
+                        // derives n=2 from the eight-byte ip advance, independent
+                        // of the gadget stream size (and rejects unit overflow).
+                        uint64_t address = (target + add_imm12) & 0xffffffffffffULL;
+                        gen(state, (unsigned long) gadget_adr);
+                        gen(state, rd | (address << 8));
                         return 1;
                     }
                 }

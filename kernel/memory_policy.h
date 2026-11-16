@@ -12,7 +12,9 @@ struct ish_memory_sample {
     uint64_t allowance_bytes, available_bytes;
     bool critical;
 };
-struct ish_memory_ticket { uint64_t bytes; long pages; bool active; };
+// disabled is private bookkeeping: a successful atomic claim pins disabled mode
+// through logical refund/commit, and carries no host pressure debt.
+struct ish_memory_ticket { uint64_t bytes; long pages; bool active, disabled; };
 struct ish_memory_budget { uint64_t pending_bytes, retained_bytes, transactions; };
 
 // Changing mode invalidates the sample, but NEVER erases retained backing debt.

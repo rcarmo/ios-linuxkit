@@ -13,6 +13,9 @@ package versions and commands may be outdated. Use the
 
 ## Recent reports
 
+- [Selected AOT RSS, sustained break-even and admission optimisations (2026-11-16)](audits/AOT_RSS_OPTIM_2026-11-16.md) — lower RSS, no measured break-even; full/selected no-emitter, policy/sanitizer and cgroup evidence.
+- [Break-even harness contract](audits/AOT_BREAK_EVEN_2026-11-15.md) and [ADRP+ADD stream compaction](audits/FUSION_OPTIM_2026-11-15.md).
+
 - [Portable admission / Linux validation](audits/MEMORY_ADMISSION_LINUX_2026-11-15.md): post-2.6.0 accounting/publication fixes, default-off tickets, opt-in sampler and explicit platform deferrals.
 - [Held-out qualification](audits/HELDOUT_LINUX_2026-11-15.md): frozen ABI15 Python/Bun/Go baselines; no new speedup or arbitrary-Go AOT claim.
 - [OpenMinis completion](audits/OPENMINIS_COMPLETION_2026-11-15.md): fd/poll

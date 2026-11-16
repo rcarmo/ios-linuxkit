@@ -2,6 +2,8 @@
 
 The maintained documentation describes the current `master` branch. Dated evidence and superseded instructions are kept under `reports/` and `legacy/`.
 
+Latest Linux experiment: [selected-image AOT RSS and memory-policy optimisation evidence](reports/audits/AOT_RSS_OPTIM_2026-11-16.md). RSS is lower; application acceleration and Darwin qualification are not established.
+
 ## Maintained guides
 
 | File | Subject |

@@ -189,7 +189,8 @@ int main(void) {
         assert(!ish_memory_policy_budget().retained_bytes);
         assert(!atomic_load(&anon_page_count));
     }
-    // Independent address spaces can attach debt to one shared backing at once.
+    // Independent address spaces charge logical aliases separately, but one
+    // shared host backing acquires its maximum debt only once.
     assert(pt_map_nothing(current->mem, 0x200, 1, 0) == 0);
     struct mem children[8];
     for (unsigned i = 0; i < 8; i++) {
@@ -199,10 +200,10 @@ int main(void) {
     for (unsigned i = 0; i < 8; i++) assert(!pthread_create(&threads[i], NULL, protect_shared, &children[i]));
     for (unsigned i = 0; i < 8; i++) assert(!pthread_join(threads[i], NULL));
     assert(atomic_load(&anon_page_count) == 8);
-    assert(ish_memory_policy_budget().retained_bytes == 8 * real_page_size);
+    assert(ish_memory_policy_budget().retained_bytes == real_page_size);
     for (unsigned i = 0; i < 8; i++) mem_destroy(&children[i]);
     assert(!atomic_load(&anon_page_count));
-    assert(ish_memory_policy_budget().retained_bytes == 8 * real_page_size);
+    assert(ish_memory_policy_budget().retained_bytes == real_page_size);
     assert(pt_unmap(current->mem, 0x200, 1) == 0);
     assert(!ish_memory_policy_budget().retained_bytes);
     assert(ish_memory_policy_enable(false));

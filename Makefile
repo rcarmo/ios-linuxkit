@@ -284,6 +284,13 @@ test-arm64-memory-pressure-cgroup: build-arm64-linux
 test-arm64-heldout-contract:
 	$(BUN) test tests/arm64/native-aot/heldout.test.ts
 
+.PHONY: test-arm64-aot-optim-contract test-arm64-memory-policy-optim
+test-arm64-aot-optim-contract:
+	$(BUN) test tests/arm64/native-aot/select.test.ts tests/arm64/native-aot/break-even.test.ts tests/arm64/native-aot/fusion-optim.test.ts tests/arm64/native-aot/execution-script.test.ts
+
+test-arm64-memory-policy-optim: build-arm64-linux
+	BUILD_DIR="$(abspath $(RELEASE_BUILD_DIR))" bash tests/arm64/upstream/run-memory-policy-optim.sh
+
 test-arm64-import-fixes: test-arm64-poll-fixes test-arm64-socket-ownership test-arm64-sha512-fallback test-arm64-tlb-stale
 
 test-arm64-poll-fixes:

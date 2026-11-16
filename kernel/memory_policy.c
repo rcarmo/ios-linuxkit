@@ -7,6 +7,11 @@
 #include "util/timer.h"
 
 static lock_t policy_lock = LOCK_INITIALIZER;
+// High bit means enabled; otherwise low bits count disabled active tickets.
+// Mode transitions CAS only an idle state under policy_lock. Thus a successful
+// disabled claim pins that mode until finish, without taking the policy mutex.
+#define POLICY_ENABLED (UINT64_C(1) << 63)
+static _Atomic uint64_t gate;
 static bool enabled, valid, braked;
 static struct ish_memory_sample sample;
 static struct ish_memory_capture issued;
@@ -17,7 +22,9 @@ static uint64_t now_ms(void) {
 }
 bool ish_memory_policy_enable(bool value) {
     lock(&policy_lock);
-    bool ok = !transactions;
+    uint64_t expected = enabled ? POLICY_ENABLED : 0;
+    bool ok = !transactions && atomic_compare_exchange_strong(&gate, &expected,
+        value ? POLICY_ENABLED : 0);
     if (ok) {
         enabled = value;
         valid = false;
@@ -86,7 +93,7 @@ bool ish_memory_policy_snapshot(struct ish_memory_sample *out, bool *out_braked)
 }
 struct ish_memory_budget ish_memory_policy_budget(void) {
     lock(&policy_lock);
-    struct ish_memory_budget b = {pending, retained, transactions};
+    struct ish_memory_budget b = {pending, retained, transactions + (atomic_load(&gate) & ~POLICY_ENABLED)};
     unlock(&policy_lock);
     return b;
 }
@@ -95,8 +102,27 @@ bool ish_memory_reserve_ticket(long pages, uint64_t bytes, struct ish_memory_tic
     uint64_t span = real_page_size;
     if (!span || bytes > UINT64_MAX - (span - 1)) return false;
     bytes = (bytes + span - 1) / span * span;
+retry:
+    ;
+    uint64_t state = atomic_load_explicit(&gate, memory_order_relaxed);
+    while (!(state & POLICY_ENABLED)) {
+        if (state == POLICY_ENABLED - 1) return false;
+        if (!atomic_compare_exchange_weak_explicit(&gate, &state, state + 1,
+                memory_order_acquire, memory_order_relaxed)) continue;
+#if ANON_MMAP_LIMIT_PAGES > 0
+        if (pages && !anon_pages_reserve(pages)) {
+            atomic_fetch_sub_explicit(&gate, 1, memory_order_release);
+            return false;
+        }
+#endif
+        *ticket = (struct ish_memory_ticket){.pages = pages, .active = true, .disabled = true};
+        return true;
+    }
     lock(&policy_lock);
-    if (!enabled) bytes = 0;
+    if (!enabled) {
+        unlock(&policy_lock);
+        goto retry;
+    }
     bool ok = transactions != UINT64_MAX && pending <= UINT64_MAX - bytes &&
         retained <= UINT64_MAX - pending - bytes;
     if (ok && bytes && enabled) {
@@ -112,7 +138,7 @@ bool ish_memory_reserve_ticket(long pages, uint64_t bytes, struct ish_memory_tic
     if (ok) {
         pending += bytes;
         transactions++;
-        *ticket = (struct ish_memory_ticket){bytes, pages, true};
+        *ticket = (struct ish_memory_ticket){.bytes = bytes, .pages = pages, .active = true};
     }
     unlock(&policy_lock);
     return ok;
@@ -122,8 +148,19 @@ bool anon_pages_reserve_ticket(long pages, struct ish_memory_ticket *ticket) {
     return ish_memory_reserve_ticket(pages, (uint64_t)pages * PAGE_SIZE, ticket);
 }
 static uint64_t finish_ticket(struct ish_memory_ticket *ticket, bool committed, bool orphaned) {
+    assert(ticket && ticket->active);
+    if (ticket->disabled) {
+#if ANON_MMAP_LIMIT_PAGES > 0
+        if (!committed) anon_pages_unreserve(ticket->pages);
+#endif
+        *ticket = (struct ish_memory_ticket){0};
+        uint64_t old = atomic_fetch_sub_explicit(&gate, 1, memory_order_release);
+        assert(old && !(old & POLICY_ENABLED));
+        (void)old;
+        return 0;
+    }
     lock(&policy_lock);
-    assert(ticket && ticket->active && transactions && pending >= ticket->bytes);
+    assert(transactions && pending >= ticket->bytes);
     uint64_t debt = committed || orphaned ? ticket->bytes : 0;
     pending -= ticket->bytes;
     retained += debt;

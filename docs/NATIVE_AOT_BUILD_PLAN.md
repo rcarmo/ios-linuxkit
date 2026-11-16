@@ -49,7 +49,8 @@ need GDB. Optional profiling needs `perf` and permission to sample user events.
 ```sh
 git clone --recurse-submodules https://github.com/rcarmo/ios-linuxkit.git
 cd ios-linuxkit
-git checkout v2.4.1
+git checkout master
+git rev-parse HEAD  # freeze this source identity with the recordings
 git submodule update --init --recursive
 CC=clang make build-arm64-linux RELEASE_BUILD_DIR=build-arm64-gadget
 CC=clang make build-arm64-native NATIVE_BUILD_DIR=build-arm64-recorder
@@ -69,7 +70,7 @@ revision. Choose new paths; do not overwrite an installed userland.
 
 ```sh
 set -eu
-WORK="$HOME/ish-aot-2.4.1"
+WORK="$HOME/ish-aot-selected"
 mkdir "$WORK"
 ROOT="$WORK/training-fakefs"
 RECORDINGS="$WORK/recordings"
@@ -118,10 +119,42 @@ On failure, keep the output directory for diagnosis and retry with a new path.
 An existing output directory is refused. A manifest lists recorder, workload,
 module, JSONL and image hashes; it does not contain a complete guest snapshot.
 
+## Reduce image RSS using training-only selection
+
+Full images can inflate resident code and read-only tables. Before evaluation,
+freeze a profile from **training only**, with the same module bytes. Ordinary
+gadget dispatch profiles are usable for ranking, but miss chained/return-cache
+edges; they are not exact execution coverage. For example, on the disposable
+training root, using a new profile path:
+
+```sh
+PROFILE="$WORK/training.profile"
+ISH_JIT=0 ISH_BLOCK_PROF_FILE="$PROFILE" \
+  "$G" -f "$ROOT" /bin/sh -ec "$(cat "$RECORDINGS/workload.sh")"
+SELECTED="$WORK/selected-recordings"
+bun tools/jit_aot/select.ts "$PROFILE" "$RECORDINGS/manifest.json" \
+  "$R" "$ROOT/data" "$SELECTED" \
+  --coverage=0.90 --max-text-ratio=0.50 --format=elf
+# Keep full and selected manifests/images separately for the paired control.
+RECORDINGS="$SELECTED"
+```
+
+The selector verifies hashes/ABI, accounts for overlapping keep closure and
+writes an exclusive manifest plus keep lists. Coverage is only represented
+training dispatch weight; the byte budget counts native segments, not whole
+ELF size or RSS. Sparse context indices and exact-image/gadget fallback remain
+unchanged. Untrained modules have zero reported representation. Never tune
+this budget using the evaluation inputs/results, relabel stale recordings or
+assume removed translations imply runtime code emission.
+
+The [November RSS/timing report](reports/audits/AOT_RSS_OPTIM_2026-11-16.md)
+shows measured memory savings but no demonstrated application break-even.
+Selection may make sustained execution slower, particularly Bun.
+
 ## Link and test an AOT-only executable
 
 ```sh
-IMAGES="$RECORDINGS/aot_musl.S,$RECORDINGS/aot_busybox.S,$RECORDINGS/aot_python.S,$RECORDINGS/aot_zlib.S"
+IMAGES=$(bun -e 'const m=await Bun.file(Bun.argv.at(-1)).json(); console.log(m.images.map(i=>i.image).join(","))' "$RECORDINGS/manifest.json")
 CC=clang meson setup build-arm64-aot --buildtype=release \
   -Djit=true -Djit_emit=false -Dcli_aot="$IMAGES"
 make build-arm64-linux RELEASE_BUILD_DIR=build-arm64-aot
@@ -129,7 +162,7 @@ EVIDENCE_DIR="$WORK/linked-release" make test-arm64-linked-aot \
   RELEASE_BUILD_DIR=build-arm64-aot ROOTFS_DIR="$ROOT" AOT_RECORD_DIR="$RECORDINGS"
 ```
 
-The check requires four accepted images, zero rejections, positive installs for
+The check requires four (or five with opt-in Bun) accepted images, zero rejections, positive installs for
 each module, zero emitted segments/units/bytes and matching workload results
 with AOT on and off. It also checks the no-emitter compiler define and object
 imports. Executable mappings for the application and host libraries still exist.
@@ -206,7 +239,7 @@ with `ready=1` after normal backend initialisation or explicit no-emitter
 runtime-off process can report `ready=0` and zero conventions. Readiness does not
 mean images are accepted or code is executing. Gadget builds have no endpoint.
 
-The tested Linux PIC/pinned ABI is `3f650e41`, code version 10, 20 prologue words,
+The tested Linux PIC/pinned ABI is `3babd760`, code version 15, 20 prologue words,
 entry offset 76 and 16 pinned registers. Collect values separately for a different
 build; never relabel recordings. An Apple contract additionally requires actual
 SDK/platform, binary SHA-256 and calling-context evidence. The
@@ -234,6 +267,15 @@ When packages change, make a new guest snapshot and recording set. When the
 emulator ABI changes, regenerate with a matching recorder. Runtime rejection
 should leave the gadget path usable; exercise that case before distributing an
 updated image. Never override the ABI field to force image acceptance.
+
+For startup-inclusive/steady-state comparisons, use explicit frozen gadget,
+full and selected build identities with
+`bun tests/arm64/native-aot/break-even.ts CONFIG NEW_EVIDENCE`. Counts default
+to 1/8/32, with monotonic phases, exact checksums and raw GNU time RSS/faults.
+The [harness contract](reports/audits/AOT_BREAK_EVEN_2026-11-15.md) describes
+configuration, distinct per-image selection and bounded process-group timeouts.
+Keep native references separate when runtime versions differ; do not extrapolate
+a fitted crossing outside the measured range.
 
 ## Troubleshoot
 

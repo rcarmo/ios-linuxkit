@@ -127,7 +127,8 @@ void mem_remove_reservations(struct mem *mem, page_t start, pages_t pages) {
     }
 }
 
-int mem_set_reservation_flags(struct mem *mem, page_t start, pages_t pages, unsigned flags) {
+static int set_reservation_flags(struct mem *mem, page_t start, pages_t pages,
+        unsigned flags, bool *changed) {
     if (pages == 0)
         return 0;
 
@@ -145,6 +146,7 @@ int mem_set_reservation_flags(struct mem *mem, page_t start, pages_t pages, unsi
         unsigned old_flags = r->flags;
         unsigned new_flags = flags | (old_flags & P_ANONYMOUS);
 
+        if (new_flags == old_flags) continue;
         if (before && after) {
             struct mem_reservation *middle = malloc(sizeof(struct mem_reservation));
             struct mem_reservation *tail = malloc(sizeof(struct mem_reservation));
@@ -194,11 +196,17 @@ int mem_set_reservation_flags(struct mem *mem, page_t start, pages_t pages, unsi
         } else {
             r->flags = new_flags;
         }
-        // A later reservation split may fail allocation. Publish this committed
-        // prefix now, just as for materialized protection changes.
-        mem_changed(mem);
+        *changed = true;
     }
     return 0;
+}
+
+// Direct callers also publish any prefix completed before a split failure.
+int mem_set_reservation_flags(struct mem *mem, page_t start, pages_t pages, unsigned flags) {
+    bool changed = false;
+    int err = set_reservation_flags(mem, start, pages, flags, &changed);
+    if (changed) mem_changed(mem);
+    return err;
 }
 
 // Recursively free page table nodes at given level
@@ -647,53 +655,87 @@ int pt_map_nothing(struct mem *mem, page_t start, pages_t pages, unsigned flags)
 // allocation type and state, not user-visible protection bits.
 #define P_META_FLAGS (P_ANONYMOUS | P_GROWSDOWN | P_COW | P_SHARED)
 
+// The high bit serializes shared-backing upgrade claims. Debt below it is
+// owned by this allocation, never by individual aliases. Claim through host
+// protection/cleanup; waiters cannot spend credit that may still be rolled back.
+#define POLICY_CLAIM (UINT64_C(1) << 63)
+static uint64_t backing_claim(struct data *data) {
+    uint64_t old = atomic_load(&data->policy_bytes);
+    for (;;) {
+        if (old & POLICY_CLAIM) {
+            sched_yield();
+            old = atomic_load(&data->policy_bytes);
+        } else if (atomic_compare_exchange_weak(&data->policy_bytes, &old, old | POLICY_CLAIM)) {
+            return old;
+        }
+    }
+}
+
 int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
+    int err = 0;
+    bool changed = false;
     for (page_t page = start; page < start + pages; page++) {
         if (mem_pt(mem, page) == NULL) {
-            if (mem_find_reservation(mem, page) != NULL)
-                continue;
+            if (mem_find_reservation(mem, page) != NULL) continue;
             return _ENOMEM;
         }
     }
     for (page_t page = start; page < start + pages; page++) {
         struct pt_entry *entry = mem_pt(mem, page);
-        if (entry == NULL)
-            continue;
+        if (entry == NULL) continue;
         unsigned old_flags = entry->flags;
         unsigned new_flags = flags | (old_flags & P_META_FLAGS);
         int delta = (int)anon_page_is_charged(new_flags) - (int)anon_page_is_charged(old_flags);
         struct ish_memory_ticket ticket = {0};
-        if (delta > 0 && !anon_pages_reserve_ticket(delta, &ticket))
-            return _ENOMEM;
-
-        // check if protection is increasing
-        if ((flags & ~old_flags) & (P_READ|P_WRITE)) {
+        uint64_t old_debt = 0;
+        if (delta > 0) {
+            struct data *backing = entry->data;
+            // Reserve the entire host-rounded allocation on its first upgrade.
+            // This conservative maximum needs no residency sample or bitmap;
+            // later aliases/upgrades cannot increase debt beyond that maximum.
+            if (!real_page_size || backing->size > POLICY_CLAIM - real_page_size) {
+                err = _ENOMEM;
+                goto out;
+            }
+            uint64_t maximum = (backing->size + real_page_size - 1) / real_page_size * real_page_size;
+            old_debt = backing_claim(backing);
+            assert(old_debt <= maximum);
+            if (!ish_memory_reserve_ticket(delta, maximum - old_debt, &ticket)) {
+                atomic_store(&backing->policy_bytes, old_debt);
+                err = _ENOMEM;
+                goto out;
+            }
+        }
+        if ((flags & ~old_flags) & (P_READ | P_WRITE)) {
             void *data = (char *) entry->data->data + entry->offset;
-            // force to be page aligned
             data = (void *) ((uintptr_t) data & ~(real_page_size - 1));
             int prot = PROT_READ;
             if (flags & P_WRITE) prot |= PROT_WRITE;
             if (mprotect(data, real_page_size, prot) < 0) {
-                int err = errno_map();
-                if (ticket.active) anon_pages_finish_ticket(&ticket, false);
-                return err;
+                err = errno_map();
+                if (ticket.active) {
+                    anon_pages_finish_ticket(&ticket, false);
+                    atomic_store(&entry->data->policy_bytes, old_debt);
+                }
+                goto out;
             }
         }
         entry->flags = new_flags;
-        if (ticket.active)
-            atomic_fetch_add(&entry->data->policy_bytes, anon_pages_finish_ticket(&ticket, true));
+        if (ticket.active) {
+            uint64_t debt = anon_pages_finish_ticket(&ticket, true);
+            atomic_store(&entry->data->policy_bytes, old_debt + debt);
+        }
 #if ANON_MMAP_LIMIT_PAGES > 0
         if (delta < 0) anon_pages_unreserve(-delta);
 #endif
-        // Earlier pages remain changed if a later protection/admission fails.
-        // Publish each successful mutation before any subsequent failure exit.
-        if (new_flags != old_flags) mem_changed(mem);
+        changed |= new_flags != old_flags;
     }
-    int err = mem_set_reservation_flags(mem, start, pages, flags);
-    if (err < 0)
-        return err;
-    mem_changed(mem);
-    return 0;
+    err = set_reservation_flags(mem, start, pages, flags, &changed);
+out:
+    // The caller holds the memory write lock. One publication covers all
+    // completed mutations, including every admission/protection/split failure.
+    if (changed) mem_changed(mem);
+    return err;
 }
 
 int pt_copy_on_write(struct mem *src, struct mem *dst, page_t start, page_t pages) {

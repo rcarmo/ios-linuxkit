@@ -88,6 +88,8 @@ struct data {
     void *data; // immutable
     size_t size; // also immutable
     // Shared admitted debt is released only on final host-backing destruction.
+    // memory.c temporarily uses the high bit to serialize bounded upgrade claims;
+    // a held mapping ref prevents destruction while a claim is in flight.
     _Atomic uint64_t policy_bytes;
     atomic_uint refcount;
 
