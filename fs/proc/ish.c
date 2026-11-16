@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <inttypes.h>
+#include <time.h>
 
 const char *proc_ish_version = "";
 char **(*get_all_defaults_keys)(void);
@@ -160,6 +162,19 @@ static int proc_ish_show_version(struct proc_entry *UNUSED(entry), struct proc_d
     return 0;
 }
 
+// Read-only observation for diagnostic clock correlation. Does not initialize
+// the backend, allocate executable memory, or alter any clock/policy state.
+static int proc_ish_profile_clock(struct proc_entry *UNUSED(entry), struct proc_data *buf) {
+    struct timespec t;
+    if (clock_gettime(CLOCK_MONOTONIC, &t) < 0 || t.tv_sec < 0 ||
+            t.tv_nsec < 0 || t.tv_nsec >= 1000000000L ||
+            (uint64_t)t.tv_sec > (UINT64_MAX - (uint64_t)t.tv_nsec) / 1000000000ULL)
+        return _EIO;
+    uint64_t ns = (uint64_t)t.tv_sec * 1000000000ULL + (uint64_t)t.tv_nsec;
+    proc_printf(buf, "{\"schema\":1,\"clock\":\"monotonic\",\"ns\":\"%" PRIu64 "\"}\n", ns);
+    return 0;
+}
+
 #ifdef ISH_JIT
 #include "asbestos/guest-arm64/jit.h"
 static int proc_ish_jit_show(struct proc_entry *UNUSED(entry), struct proc_data *buf) {
@@ -186,6 +201,7 @@ struct proc_children proc_ish_children = PROC_CHILDREN({
     {"jit", S_IFREG | 0644, .show = proc_ish_jit_show, .pwrite = proc_ish_jit_update},
     {"jit-layout", S_IFREG | 0444, .show = proc_ish_jit_layout_show},
 #endif
+    {"profile-clock", S_IFREG | 0444, .show = proc_ish_profile_clock},
     {"colors", .show = proc_ish_show_colors},
     {".defaults", S_IFDIR, .readdir = proc_ish_underlying_defaults_readdir},
     {"defaults", S_IFDIR, .readdir = proc_ish_defaults_readdir},

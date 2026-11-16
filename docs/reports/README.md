@@ -13,6 +13,7 @@ package versions and commands may be outdated. Use the
 
 ## Recent reports
 
+- [Fresh AOT phase profiles and block hashing (2026-11-16)](audits/AOT_PHASE_PROFILE_2026-11-16.md) — fresh fusion images, bounded clock correlation, mixed paired hash results, no AOT break-even through count64; rejected RSS-regressing invalidation candidate retained.
 - [Selected AOT RSS, sustained break-even and admission optimisations (2026-11-16)](audits/AOT_RSS_OPTIM_2026-11-16.md) — lower RSS, no measured break-even; full/selected no-emitter, policy/sanitizer and cgroup evidence.
 - [Break-even harness contract](audits/AOT_BREAK_EVEN_2026-11-15.md) and [ADRP+ADD stream compaction](audits/FUSION_OPTIM_2026-11-15.md).
 

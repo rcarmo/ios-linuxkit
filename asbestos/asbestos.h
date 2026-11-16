@@ -9,6 +9,18 @@
 #define FIBER_CACHE_SIZE (1 << 12)  // 4096 entries
 #define FIBER_PAGE_HASH_SIZE (1 << 10)
 
+// Keep insertion, resize and lookup on the same bucket mapping. ARM64 PCs
+// are four-byte aligned; raw address modulo a power-of-two table leaves
+// three quarters of its buckets unused. Fold page bits too, so mappings at
+// the same in-page offset do not all share a chain. Other guests keep their
+// byte-address hash. This changes neither table capacity nor block lifetime.
+static inline size_t fiber_block_hash(addr_t addr, size_t size) {
+#ifdef GUEST_ARM64
+    addr = (addr >> 2) ^ (addr >> PAGE_BITS);
+#endif
+    return addr % size;
+}
+
 struct asbestos {
     // there is one asbestos per address space
     struct mmu *mmu;

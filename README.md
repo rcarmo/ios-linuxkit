@@ -20,7 +20,7 @@ This is a reusable runtime kit. The terminal is a reference shell; the runtime a
 
 The current source version is **2.6.0** with Apple build number **827**. The repository supports ARM64 Linux programs. Ordinary builds use the interpreter. Optional ahead-of-time (AOT) builds include translated Linux code in the application executable, without generating executable code at runtime. The accelerated iOS build includes Bun and the Go toolchain; code without a matching translation uses the interpreter.
 
-Linux experiments now support training-profile-selected AOT images with lower resident memory, while preserving interpreter fallback. The [RSS/timing report](docs/reports/audits/AOT_RSS_OPTIM_2026-11-16.md) records the trade-off: lower RSS, but no demonstrated break-even in the measured workloads. Ordinary execution remains unchanged.
+Linux experiments support training-profile-selected AOT images with lower resident memory, while preserving interpreter fallback. The [RSS/timing report](docs/reports/audits/AOT_RSS_OPTIM_2026-11-16.md) and [fresh phase profiles](docs/reports/audits/AOT_PHASE_PROFILE_2026-11-16.md) record the trade-off: lower selected-image RSS and a capacity-neutral block-hash improvement, but no demonstrated AOT break-even through work count64. Gadget execution remains the default; Apple/device qualification is separate.
 
 ## What is in the repository
 

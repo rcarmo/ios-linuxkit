@@ -6,7 +6,12 @@ import sys
 import time
 import platform
 
-raw_path, repeat_arg, warmup_arg = sys.argv[1:]
+arguments = sys.argv[1:]
+profile_option = arguments[-1] if arguments and arguments[-1] in ("--profile-jit", "--profile-clock") else None
+profile_jit = profile_option == "--profile-jit"
+if profile_option:
+    arguments.pop()
+raw_path, repeat_arg, warmup_arg = arguments
 if not repeat_arg.isdecimal() or not warmup_arg.isdecimal():
     raise ValueError("integer work counts required")
 repeats, warmup = int(repeat_arg), int(warmup_arg)
@@ -28,10 +33,25 @@ def work():
         raise ValueError("roundtrip mismatch")
     return sum(r["value"] * (r["group"] + 1) for r in chosen)
 
+def snapshot(label):
+    if not profile_option:
+        return
+    before = time.perf_counter_ns()
+    anchor = json.loads(pathlib.Path("/proc/ish/profile-clock").read_text())
+    if anchor.get("schema") != 1 or anchor.get("clock") != "monotonic":
+        raise ValueError("invalid profile clock")
+    state = pathlib.Path("/proc/ish/jit").read_text() if profile_jit else None
+    after = time.perf_counter_ns()
+    print("AOT_PROFILE_SNAPSHOT " + json.dumps(dict(schema=1, label=label,
+          beforeNs=str(before), afterNs=str(after), hostNs=anchor["ns"], state=state),
+          separators=(",", ":")), file=sys.stderr)
+
 def phase(name, count):
+    snapshot(name + ".before")
     start = time.perf_counter_ns()
     total = sum(work() for _ in range(count))
     end = time.perf_counter_ns()
+    snapshot(name + ".after")
     print("BREAK_EVEN_PHASE " + json.dumps(dict(schema=1, runtime="python",
           version=platform.python_version(), clock="monotonic", phase=name,
           workCount=count, startNs=str(start), endNs=str(end),

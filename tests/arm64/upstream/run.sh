@@ -27,6 +27,7 @@ check() {
 check "$TMP/offload-policy.log" 'ALL PASSED' "$TMP/offload-policy"
 # Host-linked injection uses the actual candidate archives, not mock kernels.
 BUILD_DIR=$(dirname "$ISH_BIN")
+BUILD_DIR="$BUILD_DIR" EVIDENCE_DIR="$TMP/block-hash" CC="$CC" bash "$HERE/run-block-hash.sh"
 BUILD_DIR="$BUILD_DIR" EVIDENCE_DIR="$TMP/memory-policy" CC="$CC" bash "$HERE/run-memory-policy.sh"
 HOST_DEFS=(-DGUEST_ARM64=1 -DENGINE_ASBESTOS=1)
 if grep -q -- "-DISH_JIT=1" "$BUILD_DIR/compile_commands.json"; then HOST_DEFS+=(-DISH_JIT=1); fi

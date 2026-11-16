@@ -277,6 +277,24 @@ configuration, distinct per-image selection and bounded process-group timeouts.
 Keep native references separate when runtime versions differ; do not extrapolate
 a fitted crossing outside the measured range.
 
+For diagnostic phase attribution with already-staged inputs, run:
+
+```sh
+bun tests/arm64/native-aot/phase-profile.ts /ABS/CONFIG /ABS/NEW_PROFILE 64
+```
+
+This Linux-only sampler freezes the same explicit identities and adds opt-in
+counter/clock snapshots to the Python/Bun workloads. Read-only
+`/proc/ish/profile-clock` anchors host CLOCK_MONOTONIC to runtime clock brackets;
+Bun's process-relative nanoseconds must not be assumed equal to perf time.
+Offset bounds assume a constant relationship, exclude uncertain boundaries and
+fail on incompatible anchors. Native-image samples include stubs/checkpoints
+and TLB guards: they are not instruction/dispatch coverage. Keep these runs
+separate from uninstrumented timing/RSS series. The
+[fresh-profile report](reports/audits/AOT_PHASE_PROFILE_2026-11-16.md) records
+full/selected observations through count64, mixed block-hash gains, the rejected
+RSS-regressing page-invalidation candidate and remaining Apple/device blockers.
+
 ## Troubleshoot
 
 | Symptom | Check |

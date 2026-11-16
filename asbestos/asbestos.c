@@ -812,7 +812,7 @@ static void fiber_resize_hash(struct asbestos *asbestos, size_t new_size) {
         struct fiber_block *block, *tmp;
         list_for_each_entry_safe(&asbestos->hash[i], block, tmp, chain) {
             list_remove(&block->chain);
-            list_init_add(&new_hash[block->addr % new_size], &block->chain);
+            list_init_add(&new_hash[fiber_block_hash(block->addr, new_size)], &block->chain);
         }
     }
     free(asbestos->hash);
@@ -827,7 +827,7 @@ static void fiber_insert(struct asbestos *asbestos, struct fiber_block *block) {
     if (asbestos->num_blocks >= asbestos->hash_size * 2)
         fiber_resize_hash(asbestos, asbestos->hash_size * 2);
 
-    list_init_add(&asbestos->hash[block->addr % asbestos->hash_size], &block->chain);
+    list_init_add(&asbestos->hash[fiber_block_hash(block->addr, asbestos->hash_size)], &block->chain);
     list_init_add(blocks_list(asbestos, PAGE(block->addr), 0), &block->page[0]);
     if (PAGE(block->addr) != PAGE(block->end_addr))
         list_init_add(blocks_list(asbestos, PAGE(block->end_addr), 1), &block->page[1]);
@@ -840,7 +840,7 @@ static void fiber_insert(struct asbestos *asbestos, struct fiber_block *block) {
 }
 
 static struct fiber_block *fiber_lookup(struct asbestos *asbestos, addr_t addr) {
-    struct list *bucket = &asbestos->hash[addr % asbestos->hash_size];
+    struct list *bucket = &asbestos->hash[fiber_block_hash(addr, asbestos->hash_size)];
     if (list_null(bucket))
         return NULL;
     struct fiber_block *block;

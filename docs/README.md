@@ -2,7 +2,7 @@
 
 The maintained documentation describes the current `master` branch. Dated evidence and superseded instructions are kept under `reports/` and `legacy/`.
 
-Latest Linux experiment: [selected-image AOT RSS and memory-policy optimisation evidence](reports/audits/AOT_RSS_OPTIM_2026-11-16.md). RSS is lower; application acceleration and Darwin qualification are not established.
+Latest Linux experiment: [fresh AOT phase profiles and capacity-neutral block hashing](reports/audits/AOT_PHASE_PROFILE_2026-11-16.md), following the [selected-image RSS tranche](reports/audits/AOT_RSS_OPTIM_2026-11-16.md). Selected-image RSS is lower, but no AOT break-even is demonstrated through count64. Apple/device qualification remains blocked on the required environment.
 
 ## Maintained guides
 

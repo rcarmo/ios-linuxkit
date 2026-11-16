@@ -3,8 +3,10 @@
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const [path, repeatArg, warmupArg, ...extra] = process.argv.slice(2);
-if (!path || !/^\d+$/.test(repeatArg ?? '') || !/^\d+$/.test(warmupArg ?? '') || extra.length)
- throw Error('usage: break-even-bun.ts RECORDS REPEATS WARMUP');
+const profileJit=extra.length===1 && extra[0]==='--profile-jit';
+const profileClock=profileJit||extra.length===1&&extra[0]==='--profile-clock';
+if (!path || !/^\d+$/.test(repeatArg ?? '') || !/^\d+$/.test(warmupArg ?? '') || extra.length && !profileClock)
+ throw Error('usage: break-even-bun.ts RECORDS REPEATS WARMUP [--profile-jit|--profile-clock]');
 const repeats = Number(repeatArg), warmup = Number(warmupArg);
 if (!Number.isInteger(repeats) || repeats < 1 || repeats > 64 || !Number.isInteger(warmup) || warmup < 0 || warmup > 8)
  throw Error('unbounded work count');
@@ -25,10 +27,19 @@ function work(): number {
   Object.entries(chosen[i]).some(([k,v]) => r[k] !== v))) throw Error('roundtrip mismatch');
  return chosen.reduce((sum:number,r:any) => sum+r.value*(r.group+1),0);
 }
+function snapshot(label:string) {
+ if(!profileClock)return;
+ const before=process.hrtime.bigint(),anchor=JSON.parse(readFileSync('/proc/ish/profile-clock','utf8'));
+ if(anchor.schema!==1||anchor.clock!=='monotonic')throw Error('invalid profile clock');
+ const state=profileJit?readFileSync('/proc/ish/jit','utf8'):null,after=process.hrtime.bigint();
+ console.error('AOT_PROFILE_SNAPSHOT '+JSON.stringify({schema:1,label,beforeNs:String(before),afterNs:String(after),hostNs:anchor.ns,state}));
+}
 function phase(name:string, count:number):number {
+ snapshot(name+'.before');
  const start = process.hrtime.bigint(); let total = 0;
  for (let i=0;i<count;i++) total += work();
  const end = process.hrtime.bigint();
+ snapshot(name+'.after');
  console.error('BREAK_EVEN_PHASE '+JSON.stringify({schema:1,runtime:'bun',version:Bun.version,
   clock:'monotonic',phase:name,workCount:count,startNs:String(start),endNs:String(end),seconds:Number(end-start)/1e9}));
  return total;
